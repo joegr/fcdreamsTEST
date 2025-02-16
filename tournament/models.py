@@ -5,6 +5,61 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from django.utils.text import slugify
 import uuid
+import random
+import string
+from django.conf import settings
+from django.db.models.signals import pre_save, post_save
+from django.dispatch import receiver
+import logging
+import json
+from datetime import datetime
+
+# Create a custom tournament logger
+tournament_logger = logging.getLogger('tournament.state')
+tournament_logger.setLevel(logging.INFO)
+
+# Add custom formatter for tournament events
+class TournamentLogFormatter(logging.Formatter):
+    def format(self, record):
+        if hasattr(record, 'tournament_data'):
+            record.msg = json.dumps({
+                'timestamp': datetime.now().isoformat(),
+                'event': record.event_type,
+                'tournament': record.tournament_data,
+                'details': record.msg
+            })
+        return super().format(record)
+
+# Set up file handler
+handler = logging.FileHandler('tournament_events.log')
+handler.setFormatter(TournamentLogFormatter())
+tournament_logger.addHandler(handler)
+
+def get_system_user():
+    """Get or create system user for orphaned teams"""
+    system_user, _ = User.objects.get_or_create(
+        username='system',
+        defaults={
+            'email': 'system@example.com',
+            'is_active': False
+        }
+    )
+    return system_user
+
+def get_admin_user():
+    """Get or create admin user for orphaned teams"""
+    admin_user, created = User.objects.get_or_create(
+        username='admin',
+        defaults={
+            'is_staff': True,
+            'is_superuser': True,
+            'email': 'admin@example.com'
+        }
+    )
+    if created:
+        admin_user.set_password('admin123')  # Set a default password
+        admin_user.save()
+    return admin_user.id  # Return ID to avoid circular imports
 
 class Manager(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
@@ -50,6 +105,31 @@ class Tournament(models.Model):
     def __str__(self):
         return self.name
 
+    def log_state_change(self, event_type, details):
+        """Log tournament state changes"""
+        tournament_logger.info(
+            details,
+            extra={
+                'event_type': event_type,
+                'tournament_data': {
+                    'id': self.id,
+                    'name': self.name,
+                    'status': self.status,
+                    'teams': list(self.team_set.values_list('name', flat=True))
+                }
+            }
+        )
+
+@receiver(pre_save, sender=Tournament)
+def log_tournament_update(sender, instance, **kwargs):
+    if instance.id:  # Only log updates, not creation
+        old_instance = Tournament.objects.get(id=instance.id)
+        if old_instance.status != instance.status:
+            instance.log_state_change(
+                'STATUS_CHANGE',
+                f"Tournament status changed from {old_instance.status} to {instance.status}"
+            )
+
 class Team(models.Model):
     slug = models.SlugField(
         unique=True, 
@@ -57,8 +137,12 @@ class Team(models.Model):
         default=''
     )
     name = models.CharField(max_length=100)
-    manager = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE)
+    manager = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE,
+        default=get_admin_user
+    )
     player_count = models.IntegerField(
         default=0,
         validators=[
@@ -66,7 +150,18 @@ class Team(models.Model):
             MaxValueValidator(14)
         ]
     )
+    registration_code = models.CharField(
+        max_length=8,
+        unique=True,
+        blank=True,
+        null=True  # Null when registration complete
+    )
     registration_complete = models.BooleanField(default=False)
+    registration_expires = models.DateTimeField(null=True, blank=True)
+    strength_rating = models.IntegerField(
+        default=50,
+        validators=[MinValueValidator(1), MaxValueValidator(100)]
+    )
 
     class Meta:
         unique_together = ['tournament', 'name']
@@ -102,8 +197,22 @@ class Team(models.Model):
             timestamp = timezone.now().strftime('%Y%m%d%H%M')
             unique_id = str(uuid.uuid4())[:8]
             self.slug = f"{timestamp}_team_{slugify(self.name)}_{unique_id}"
-        self.full_clean()
+        if not self.registration_code and not self.registration_complete:
+            self.registration_code = self._generate_unique_code()
         super().save(*args, **kwargs)
+
+    def _generate_unique_code(self):
+        """Generate a unique registration code"""
+        while True:
+            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            if not Team.objects.filter(registration_code=code).exists():
+                return code
+
+    def expire_registration(self):
+        """Expire registration code"""
+        self.registration_code = None
+        self.registration_expires = None
+        self.save()
 
     def __str__(self):
         return f"{self.name} ({self.player_count} players)"
@@ -166,6 +275,20 @@ class Match(models.Model):
     def __str__(self):
         return f"{self.team_home} vs {self.team_away}"
 
+    def log_match_result(self):
+        """Log match results"""
+        self.tournament.log_state_change(
+            'MATCH_COMPLETED',
+            {
+                'match_id': self.id,
+                'stage': self.stage,
+                'home_team': self.team_home.name,
+                'away_team': self.team_away.name,
+                'score': f"{self.home_score}-{self.away_score}",
+                'winner': self.team_home.name if self.home_score > self.away_score else self.team_away.name
+            }
+        )
+
 class Result(models.Model):
     slug = models.SlugField(
         unique=True, 
@@ -210,6 +333,23 @@ class Result(models.Model):
             self.match.status = 'CONFIRMED'
             self.match.home_score = self.home_score
             self.match.away_score = self.away_score
+            self.match.save()
+
+    def submit_result_image(self, team, image, data):
+        """Handle result submission with image verification"""
+        is_home = team == self.match.team_home
+        
+        # Save image for OCR processing
+        image_field = 'home_score_img' if is_home else 'away_score_img'
+        setattr(self, image_field, image)
+        self.save()
+        
+        # Process OCR and verify scores
+        ocr_score = self._process_ocr(image)
+        if ocr_score == data['score']:
+            self.confirm_result(team, data)
+        else:
+            self.match.status = 'DISPUTED'
             self.match.save()
 
     def __str__(self):

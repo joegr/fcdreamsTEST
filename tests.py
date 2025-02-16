@@ -6,6 +6,9 @@ from django.conf import settings
 from rest_framework.test import APITestCase
 from rest_framework import status
 from datetime import timedelta
+import random
+import factory
+from factory.django import DjangoModelFactory
 
 from tournament.models import Tournament, Team, Match, Result
 from tournament.services.group_stage import GroupStageService
@@ -17,124 +20,129 @@ from tournament.signals import create_match_result  # Import the signal
 from django.db.models.signals import post_save
 post_save.connect(create_match_result, sender=Match)
 
-class TournamentStagesTest(TestCase):
-	@classmethod
-	def setUpTestData(cls):
-		# Set up non-modified data for all test methods
-		settings.TESTING = True
+# Base User Factory
+class UserFactory(DjangoModelFactory):
+	class Meta:
+		model = User
+		django_get_or_create = ('username',)
 
+	username = factory.Sequence(lambda n: f'user_{n:03d}')
+	email = factory.LazyAttribute(lambda obj: f'{obj.username}@example.com')
+	password = 'testpass123'
+
+	@factory.post_generation
+	def set_password(self, create, extracted, **kwargs):
+		self.set_password(self.password)
+		self.save()
+
+# Tournament Factory (depends only on User)
+class TournamentFactory(DjangoModelFactory):
+	class Meta:
+		model = Tournament
+
+	name = factory.Sequence(lambda n: f'Tournament_{n:03d}')
+	datetime = factory.LazyFunction(timezone.now)
+	number_of_groups = 8
+	teams_per_group = 4
+	status = 'GROUP_STAGE'
+	organizer = factory.SubFactory(UserFactory)
+
+# Team Factory (depends on Tournament and User)
+class TeamFactory(DjangoModelFactory):
+	class Meta:
+		model = Team
+		django_get_or_create = ('name', 'tournament')
+
+	name = factory.Sequence(lambda n: f'Team_{chr(65 + (n % 26))}_{n // 26}')
+	tournament = factory.SubFactory(TournamentFactory)
+	manager = factory.SubFactory(UserFactory)
+	registration_complete = True
+	strength_rating = factory.Sequence(lambda n: 100 - n)
+
+# Match Factory (depends on Tournament)
+class MatchFactory(DjangoModelFactory):
+	class Meta:
+		model = Match
+
+	tournament = factory.SubFactory(TournamentFactory)
+	match_date = factory.LazyAttribute(lambda obj: obj.tournament.datetime + timedelta(days=1))
+	stage = 'GROUP'
+	status = 'SCHEDULED'
+
+class TournamentProgressionTest(TestCase):
 	def setUp(self):
-		# Ensure signals are connected
-		post_save.connect(create_match_result, sender=Match)
+		"""Set up tournament with 32 teams"""
+		self.tournament = TournamentFactory()
 		
-		# Create tournament
-		self.tournament = Tournament.objects.create(
-			name="Test Tournament",
-			datetime=timezone.now(),
-			number_of_groups=2,
-			teams_per_group=4,
-			status='GROUP_STAGE'
+		# Create teams with explicit tournament to avoid creating multiple tournaments
+		self.teams = TeamFactory.create_batch(
+			size=32,
+			tournament=self.tournament
 		)
 		
-		# Create 8 teams (2 groups of 4)
-		self.teams = []
-		for i in range(8):
-			user = User.objects.create_user(f'user{i}', f'user{i}@test.com', 'pass123')
-			team = Team.objects.create(
-				name=f"Team {i}",
-				tournament=self.tournament,
-				manager=user,
-				registration_complete=True
-			)
-			self.teams.append(team)
-		
-		# Generate groups and matches
+		self.tournament_service = TournamentService(self.tournament)
 		self.group_service = GroupStageService(self.tournament)
-		self.groups = self.group_service.generate_groups()
-		self.matches = self.group_service.generate_matches()
 
-	def simulate_group_matches(self):
-		"""Simulate all group stage matches with results"""
-		for match in self.matches:
-			# Get or create the result object (should be auto-created with match)
-			result = match.result
-			
-			# Simulate home team confirmation
-			result.home_score = 2
-			result.away_score = 1
-			result.home_team_confirmed = True
-			result.save()
-			
-			# Simulate away team confirmation
-			result.away_team_confirmed = True
-			result.save()
-			
-			# Update match status
-			match.status = 'CONFIRMED'
-			match.home_score = result.home_score
-			match.away_score = result.away_score
-			match.save()
-
-	def test_complete_tournament_flow(self):
-		"""Test complete tournament flow from groups to knockout stage"""
-		# Simulate group stage matches
-		self.simulate_group_matches()
+	def test_group_stage(self):
+		"""Test group stage progression"""
+		groups = self.group_service.generate_groups()
+		self.assertEqual(len(groups), 8)
 		
-		# Check if group stage is complete
+		matches = self.group_service.generate_matches()
+		self.assertEqual(len(matches), 48)
+		
+		# Simulate all group matches
+		for match in matches:
+			self._simulate_match(match)
+		
+		# Verify group stage completion
 		self.assertTrue(self.group_service.is_group_stage_complete())
+		qualified_teams = self.group_service.get_qualified_teams()
+		self.assertEqual(len(qualified_teams), 16)
+		return qualified_teams
+
+	def test_knockout_progression(self):
+		"""Test complete knockout stage progression"""
+		qualified_teams = self.test_group_stage()
 		
-		# Transition to knockout stage
-		self.group_service.transition_to_knockout_stage()
+		# Test each knockout round
+		stages = [
+			('RO16', 16, 8),
+			('QUARTER', 8, 4),
+			('SEMI', 4, 2),
+			('FINAL', 2, 1)
+		]
 		
-		# Verify tournament status
+		current_teams = qualified_teams
+		for stage, num_teams, expected_matches in stages:
+			self.assertEqual(len(current_teams), num_teams)
+			
+			matches = self.tournament_service.create_knockout_matches(
+				current_teams, stage
+			)
+			self.assertEqual(len(matches), expected_matches)
+			
+			# Simulate matches
+			for match in matches:
+				self._simulate_match(match)
+			
+			if stage != 'FINAL':
+				current_teams = self.tournament_service.get_stage_winners(stage)
+		
+		# Verify tournament completion
 		self.tournament.refresh_from_db()
-		self.assertEqual(self.tournament.status, 'KNOCKOUT')
-		
-		# Verify knockout matches were created
-		knockout_matches = Match.objects.filter(
-			tournament=self.tournament,
-			stage__in=['QUARTER', 'SEMI', 'FINAL']
-		)
-		self.assertTrue(knockout_matches.exists())
+		self.assertEqual(self.tournament.status, 'COMPLETED')
 
-	def test_group_stage_standings(self):
-		"""Test detailed group standings calculation"""
-		self.simulate_group_matches()
+	def _simulate_match(self, match):
+		"""Simulate match with deterministic outcome"""
+		result = match.result
+		if match.team_home.strength_rating > match.team_away.strength_rating:
+			result.home_score, result.away_score = 2, 0
+		else:
+			result.home_score, result.away_score = 0, 2
 		
-		standings = self.group_service.get_group_standings()
-		
-		# Verify standings structure
-		self.assertEqual(len(standings), 2)  # Two groups
-		
-		for group_num, group_standings in standings.items():
-			# Verify each group has 4 teams
-			self.assertEqual(len(group_standings), 4)
-			
-			# Verify standings are ordered by points
-			points = [team_stats['points'] for team_stats in group_standings]
-			self.assertEqual(points, sorted(points, reverse=True))
-			
-			# Verify point calculations
-			for team_stats in group_standings:
-				expected_points = (team_stats['wins'] * 3) + team_stats['draws']
-				self.assertEqual(team_stats['points'], expected_points)
-				
-				# Verify goal difference calculation
-				self.assertEqual(
-					team_stats['goal_difference'],
-					team_stats['goals_for'] - team_stats['goals_against']
-				)
-
-	def tearDown(self):
-		# Disconnect signals to prevent interference between tests
-		post_save.disconnect(create_match_result, sender=Match)
-		
-		# Clean up created objects
-		Result.objects.all().delete()
-		Match.objects.all().delete()
-		Team.objects.all().delete()
-		Tournament.objects.all().delete()
-		User.objects.all().delete()
+		result.home_team_confirmed = result.away_team_confirmed = True
+		result.save()
 
 class ModelTests(TestCase):
 	"""Test model creation and validation"""

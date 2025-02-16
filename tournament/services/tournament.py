@@ -6,6 +6,7 @@ from ..models import Tournament, Team, Match, Result
 from .group_stage import GroupStageService
 from .knockout import KnockoutService
 import logging
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,6 @@ class TournamentService:
             return
 
         match = result.match
-        
         # Update match with confirmed result
         match.home_score = result.home_score
         match.away_score = result.away_score
@@ -192,33 +192,100 @@ class TournamentService:
 
         # Handle tournament stage transitions
         if self.tournament.status == 'GROUP_STAGE':
-            self._handle_group_stage_progression()
-        elif self.tournament.status == 'KNOCKOUT':
-            self._handle_knockout_stage_progression()
-
-    def _handle_group_stage_progression(self) -> None:
-        """Handle group stage completion and transition"""
-        if self.group_service.is_group_stage_complete():
-            try:
+            if self.group_service.is_group_stage_complete():
                 qualified_teams = self.group_service.get_qualified_teams()
-                self.knockout_service.generate_matches(qualified_teams)
+                self.create_knockout_matches(qualified_teams, 'RO16')
                 self.tournament.status = 'KNOCKOUT'
-                self.tournament.save()
-            except Exception as e:
-                logger.error(f"Failed to transition to knockout stage: {e}")
-                raise
-
-    def _handle_knockout_stage_progression(self) -> None:
-        """Handle knockout stage progression"""
-        try:
-            current_stage = self.knockout_service.get_current_stage()
-            if current_stage and self.knockout_service.is_stage_complete(current_stage):
-                if current_stage == 'FINAL':
+            else:
+                try:
+                    qualified_teams = self.group_service.get_qualified_teams()
+                    # Create RO16 matches
+                    self.knockout_service.generate_matches(qualified_teams)
+                    self.tournament.status = 'KNOCKOUT'
+                except Exception as e:
+                    logger.error(f"Failed to transition to knockout stage: {e}")
+                    raise
+        elif self.tournament.status == 'KNOCKOUT':
+            try:
+                if match.stage == 'FINAL' and self.knockout_service.is_stage_complete('FINAL'):
                     self.tournament.status = 'COMPLETED'
                     self.tournament.save()
-                else:
-                    winners = self.knockout_service.get_stage_winners(current_stage)
+                elif self.knockout_service.is_stage_complete(match.stage):
+                    winners = self.knockout_service.get_stage_winners(match.stage)
                     self.knockout_service.generate_next_stage_matches(winners)
-        except Exception as e:
-            logger.error(f"Failed to progress knockout stage: {e}")
-            raise 
+            except Exception as e:
+                logger.error(f"Failed to progress knockout stage: {e}")
+                raise
+
+    def create_knockout_matches(self, teams: List[Team], stage: str) -> List[Match]:
+        """Create knockout stage matches"""
+        if len(teams) % 2 != 0:
+            raise ValueError("Need even number of teams for knockout stage")
+            
+        # First, delete any existing unplayed matches for this stage
+        Match.objects.filter(
+            tournament=self.tournament,
+            stage=stage,
+            status='SCHEDULED'
+        ).delete()
+            
+        matches = []
+        # Pair teams: 1st vs last, 2nd vs second-last, etc.
+        for i in range(len(teams) // 2):
+            match = Match.objects.create(
+                tournament=self.tournament,
+                team_home=teams[i],
+                team_away=teams[-(i+1)],
+                match_date=self.tournament.datetime + timedelta(days=i),
+                stage=stage,
+                status='SCHEDULED'
+            )
+            matches.append(match)
+        
+        return matches
+
+    def get_stage_winners(self, stage: str) -> List[Team]:
+        """Get winning teams from a specific stage"""
+        stage_matches = Match.objects.filter(
+            tournament=self.tournament,
+            stage=stage,
+            status='CONFIRMED'
+        )
+        
+        winners = []
+        for match in stage_matches:
+            if match.home_score > match.away_score:
+                winners.append(match.team_home)
+            else:
+                winners.append(match.team_away)
+        return winners
+
+    def get_tournament_winner(self) -> Optional[Team]:
+        """Get the tournament winner"""
+        final_match = Match.objects.filter(
+            tournament=self.tournament,
+            stage='FINAL',
+            status='CONFIRMED'
+        ).first()
+        
+        if final_match:
+            return final_match.team_home if final_match.home_score > final_match.away_score else final_match.team_away
+        return None
+
+    def handle_team_registration(self, team: Team) -> None:
+        """Handle team registration process"""
+        if not team.registration_code:
+            raise ValueError("Invalid registration code")
+        
+        if team.registration_expires and team.registration_expires < timezone.now():
+            raise ValueError("Registration code has expired")
+        
+        # Set registration expiry (e.g., 24 hours from now)
+        team.registration_expires = timezone.now() + timedelta(hours=24)
+        team.save()
+
+    def complete_registration(self, team: Team) -> None:
+        """Complete team registration"""
+        team.registration_complete = True
+        team.expire_registration()  # Clear registration code
+        team.save() 

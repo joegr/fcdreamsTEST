@@ -9,6 +9,7 @@ import logging
 import os
 import json
 from threading import Lock
+from .services.notification import notify_team_for_confirmation, notify_match_confirmation
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +64,29 @@ def create_match_result(sender, instance, created, **kwargs):
     if created:
         Result.objects.create(match=instance)
 
+@receiver(post_save, sender=Match)
+def handle_match_completion(sender, instance, **kwargs):
+    """Handle match completion and logging"""
+    if instance.status == 'CONFIRMED':
+        # Log match result only
+        instance.log_match_result()
+
 @receiver(post_save, sender=Result)
 def handle_result_confirmation(sender, instance, **kwargs):
-    """Trigger tournament service to handle result confirmation"""
-    try:
-        tournament_service = TournamentService(instance.match.tournament)
-        tournament_service.handle_result_confirmation(instance)
-    except Exception as e:
-        logger.error(f"Error handling result confirmation: {e}")
+    """Handle tournament progression when result is confirmed"""
+    if instance.home_team_confirmed and instance.away_team_confirmed:
+        try:
+            tournament_service = TournamentService(instance.match.tournament)
+            tournament_service.handle_result_confirmation(instance)
+        except Exception as e:
+            logger.error(f"Error handling result confirmation: {e}")
+
+@receiver(post_save, sender=Result)
+def notify_result_confirmation(sender, instance, **kwargs):
+    """Send notifications for result confirmations"""
+    if instance.home_team_confirmed and not instance.away_team_confirmed:
+        notify_team_for_confirmation(instance.match.team_away)
+    elif instance.away_team_confirmed and not instance.home_team_confirmed:
+        notify_team_for_confirmation(instance.match.team_home)
+    elif instance.home_team_confirmed and instance.away_team_confirmed:
+        notify_match_confirmation(instance.match)
