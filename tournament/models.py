@@ -249,7 +249,6 @@ class Match(models.Model):
         ],
         default='SCHEDULED'
     )
-    confirmed = models.BooleanField(default=False)
     dispute_reason = models.TextField(blank=True)
 
     def save(self, *args, **kwargs):
@@ -316,3 +315,15 @@ class Result(models.Model):
 
     def __str__(self):
         return f"{self.match} - {self.team_home} vs {self.team_away}"
+
+    def save(self, *args, **kwargs):
+        if self.home_confirmed and self.away_confirmed:
+            self.confirmed = True
+        elif self.home_confirmed or self.away_confirmed:
+            self.confirmed = False
+            self.disputed = True
+        else:
+            self.confirmed = False
+            self.disputed = False
+        super().save(*args, **kwargs)
+
