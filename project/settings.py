@@ -41,8 +41,6 @@ INSTALLED_APPS = [
     'rest_framework',
     'tournament', # Add the app to the installed apps
     'tournament.templatetags',
-    'tests',
-    'factory_boy'
 ]
 
 REST_FRAMEWORK = {

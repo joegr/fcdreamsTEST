@@ -310,6 +310,8 @@ class Result(models.Model):
     team_away = models.ForeignKey(Team, related_name='away_results', on_delete=models.CASCADE)
     home_score = models.IntegerField(default=0)
     away_score = models.IntegerField(default=0)
+    home_confirmed = models.BooleanField(default=False)
+    away_confirmed = models.BooleanField(default=False)
     confirmed = models.BooleanField(default=False)
 
     def __str__(self):
