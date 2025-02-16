@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 import io
 from django.core.serializers.json import DjangoJSONEncoder
 import json
+from rest_framework import serializers
 
 class SignUpView(CreateView):
     form_class = UserCreationForm
