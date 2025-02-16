@@ -3,13 +3,13 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.urls import reverse
 from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 from rest_framework import status
 from datetime import timedelta
 import random
 import factory
 from factory.django import DjangoModelFactory
-
 from tournament.models import Tournament, Team, Match, Result
 from tournament.services.group_stage import GroupStageService
 from tournament.services.knockout import KnockoutService
@@ -61,13 +61,33 @@ class TeamFactory(DjangoModelFactory):
 
 # Match Factory (depends on Tournament)
 class MatchFactory(DjangoModelFactory):
-	class Meta:
-		model = Match
+    class Meta:
+        model = Match
+        
+    tournament = factory.SubFactory(TournamentFactory)
+    team_home = factory.SubFactory(TeamFactory)
+    team_away = factory.SubFactory(TeamFactory) 
+    stage = 'GROUP'
+    status = 'SCHEDULED'
+    match_date = factory.LazyFunction(timezone.now)
 
-	tournament = factory.SubFactory(TournamentFactory)
-	match_date = factory.LazyAttribute(lambda obj: obj.tournament.datetime + timedelta(days=1))
-	stage = 'GROUP'
-	status = 'SCHEDULED'
+    @factory.post_generation
+    def group(self, create, extracted, **kwargs):
+        if not create:
+            return
+            
+        if extracted:
+            self.group = extracted
+        else:
+            # Default to group A if not specified
+            self.group = 'A'
+            
+    class Params:
+        # Allow overriding tournament teams belong to
+        same_tournament = factory.Trait(
+            team_home=factory.SubFactory(TeamFactory, tournament=factory.SelfAttribute('..tournament')),
+            team_away=factory.SubFactory(TeamFactory, tournament=factory.SelfAttribute('..tournament'))
+        )
 
 class TournamentProgressionTest(TestCase):
 	def setUp(self):
@@ -166,31 +186,162 @@ class APITests(APITestCase):
 		pass  # Add tests
 
 class ViewTests(TestCase):
-	"""Test view functionality"""
-	
-	def test_dashboard_views(self):
-		"""Test dashboard rendering"""
-		pass  # Add tests
+    def setUp(self):
+        self.client = Client()
+        self.tournament = TournamentFactory()
+        self.user = UserFactory()
+        self.team = TeamFactory(
+            tournament=self.tournament,
+            manager=self.user
+        )
+        self.client.force_login(self.user)
 
+    def test_dashboard_view(self):
+        response = self.client.get(reverse('dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'dashboard.html')
+
+    def test_match_result_submission(self):
+        match = MatchFactory(
+            tournament=self.tournament,
+            team_home=self.team,
+            team_away=TeamFactory(tournament=self.tournament)
+        )
+        response = self.client.post(
+            reverse('submit-result'),
+            {
+                'match': match.id,
+                'home_score': 2,
+                'away_score': 1
+            }
+        )
+        self.assertEqual(response.status_code, 200)
 class SignalTests(TestCase):
-	"""Test signal behavior"""
-	
-	def test_result_creation_signal(self):
-		"""Test result is created with match"""
-		tournament = Tournament.objects.create(
-			name="Test Tournament",
-			datetime=timezone.now()
-		)
-		team1 = Team.objects.create(name="Team 1", tournament=tournament)
-		team2 = Team.objects.create(name="Team 2", tournament=tournament)
-		
-		match = Match.objects.create(
-			tournament=tournament,
-			team_home=team1,
-			team_away=team2,
-			match_date=timezone.now()
-		)
-		
-		# Verify result was created
-		self.assertTrue(hasattr(match, 'result'))
-		self.assertIsNotNone(match.result)
+    def setUp(self):
+        self.tournament = Tournament.objects.create(name="Test Tournament")
+        self.team1 = Team.objects.create(name="Team 1", tournament=self.tournament)
+        self.team2 = Team.objects.create(name="Team 2", tournament=self.tournament)
+
+    def test_result_creation_signal(self):
+        match = Match.objects.create(
+            tournament=self.tournament,
+            team_home=self.team1,
+            team_away=self.team2,
+            stage='GROUP'
+        )
+        self.assertTrue(hasattr(match, 'result'))
+        self.assertEqual(match.result.home_score, 0)
+        self.assertEqual(match.result.away_score, 0)
+from django.core import mail
+from datetime import date
+
+class GroupStageTestCase(TestCase):
+    def setUp(self):
+        self.tournament = TournamentFactory(number_of_groups=8, teams_per_group=4)
+        self.teams = [TeamFactory(tournament=self.tournament) for _ in range(32)]
+        self.service = GroupStageService(self.tournament)
+
+    def test_group_creation(self):
+        groups = self.service.generate_groups()
+        self.assertEqual(len(groups), 8)
+        for group in groups.values():
+            self.assertEqual(len(group), 4)
+
+    def test_match_generation(self):
+        matches = self.service.create_group_matches()
+        expected_matches = 8 * 6  # 8 groups × 6 matches per group (4 teams play each other once)
+        self.assertEqual(len(matches), expected_matches)
+        
+        # Verify match properties
+        first_match = matches[0]
+        self.assertEqual(first_match.stage, 'GROUP')
+        self.assertEqual(first_match.status, 'SCHEDULED')
+        self.assertNotEqual(first_match.team_home, first_match.team_away)
+
+    def test_standings_calculation(self):
+        match = Match.objects.create(
+            tournament=self.tournament,
+            team_home=self.teams[0],
+            team_away=self.teams[1],
+            home_score=2,
+            away_score=1,
+            status='CONFIRMED'
+        )
+        standings = self.service.get_group_standings('A')
+        winner = next(s for s in standings if s['team'] == self.teams[0])
+        self.assertEqual(winner['points'], 3)
+
+class KnockoutStageTestCase(TestCase):
+    def setUp(self):
+        self.tournament = TournamentFactory()
+        self.teams = [TeamFactory(tournament=self.tournament) for _ in range(16)]
+        self.service = KnockoutService(self.tournament)
+
+    def test_knockout_bracket_generation(self):
+        matches = self.service.generate_knockout_matches(self.teams, 'RO16')
+        self.assertEqual(len(matches), 8)
+
+    def test_winner_determination(self):
+        match = Match.objects.create(
+            tournament=self.tournament,
+            team_home=self.teams[0],
+            team_away=self.teams[1],
+            home_score=2,
+            away_score=1,
+            status='CONFIRMED',
+            stage='RO16'
+        )
+        winner = self.service.get_match_winner(match)
+        self.assertEqual(winner, self.teams[0])
+
+class ViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = UserFactory()
+        self.tournament = TournamentFactory()
+        self.team = TeamFactory(tournament=self.tournament, manager=self.user)
+
+    def test_dashboard_view(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'dashboard.html')
+
+    def test_match_result_submission(self):
+        self.client.force_login(self.user)
+        match = Match.objects.create(
+            tournament=self.tournament,
+            team_home=self.team,
+            team_away=TeamFactory(tournament=self.tournament),
+            match_date=timezone.now()
+        )
+        response = self.client.post(
+            reverse('submit-result'),
+            {
+                'match': match.id,
+                'home_score': 2,
+                'away_score': 1,
+                'score_img': SimpleUploadedFile("score.jpg", b"file_content")
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        match.refresh_from_db()
+        self.assertEqual(match.status, 'PENDING')
+
+class APITests(APITestCase):
+    def setUp(self):
+        self.user = UserFactory()
+        self.tournament = TournamentFactory()
+        self.client.force_authenticate(user=self.user)
+
+    def test_tournament_list(self):
+        response = self.client.get(reverse('tournament-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_team_creation(self):
+        data = {
+            'name': 'New Team',
+            'tournament': self.tournament.id
+        }
+        response = self.client.post(reverse('team-list'), data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)

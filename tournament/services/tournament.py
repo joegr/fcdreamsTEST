@@ -54,11 +54,10 @@ class TournamentService:
         # Create the result submission
         result = Result.objects.create(
             match=match,
-            submitting_team=submitting_team,
+            team_home=submitting_team if submitting_team == match.team_home else match.team_home,
+            team_away=match.team_away,
             home_score=our_score if submitting_team == match.team_home else opponent_score,
             away_score=opponent_score if submitting_team == match.team_home else our_score,
-            extra_time=extra_time,
-            penalties=penalties
         )
 
         # Check if both teams have submitted results
@@ -232,10 +231,18 @@ class TournamentService:
         matches = []
         # Pair teams: 1st vs last, 2nd vs second-last, etc.
         for i in range(len(teams) // 2):
+            team_home = teams[i]
+            team_away = teams[-(i+1)]
+
+            if team_home.id == team_away.id:
+                raise ValueError("A team cannot play against itself")
+
             match = Match.objects.create(
                 tournament=self.tournament,
-                team_home=teams[i],
-                team_away=teams[-(i+1)],
+                team_home=team_home,
+                team_away=team_away,
+                home_score=0,  # Initialize scores
+                away_score=0,  # Initialize scores
                 match_date=self.tournament.datetime + timedelta(days=i),
                 stage=stage,
                 status='SCHEDULED'
@@ -289,3 +296,54 @@ class TournamentService:
         team.registration_complete = True
         team.expire_registration()  # Clear registration code
         team.save() 
+
+    def generate_knockout_matches(self) -> List[Match]:
+        """Generate knockout stage matches"""
+        qualified_teams = self.group_service.get_qualified_teams()
+        matches = []
+
+        # Ensure we have an even number of teams
+        if len(qualified_teams) % 2 != 0:
+            raise ValueError("Need even number of teams for knockout stage")
+
+        # Shuffle teams to randomize pairing
+        random.shuffle(qualified_teams)
+
+        # Create matches ensuring no team plays against itself
+        for i in range(0, len(qualified_teams), 2):
+            try:
+                team_home = qualified_teams[i]
+                team_away = qualified_teams[i + 1]
+
+                # Check for self-match
+                if team_home.id == team_away.id:
+                    raise ValueError("A team cannot play against itself")
+
+                match = Match.objects.create(
+                    tournament=self.tournament,
+                    team_home=team_home,
+                    team_away=team_away,
+                    home_score=0,  # Initialize scores
+                    away_score=0,  # Initialize scores
+                    stage='KNOCKOUT',
+                    status='SCHEDULED'
+                )
+                matches.append(match)
+
+            except ValueError as e:
+                logger.warning(f"Skipping match creation due to error: {e}")
+
+        return matches
+
+    def create_match(self, team_home: Team, team_away: Team) -> Match:
+        """Create a match between two teams"""
+        match = Match.objects.create(
+            tournament=self.tournament,
+            team_home=team_home,
+            team_away=team_away,
+            home_score=0,  # Initialize scores
+            away_score=0,  # Initialize scores
+            stage='GROUP',
+            status='SCHEDULED'
+        )
+        return match

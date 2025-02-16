@@ -33,4 +33,4 @@ def notify_match_confirmation(match):
                 'score': f"{match.home_score}-{match.away_score}"
             }
         }
-    ) 
+    )

@@ -5,4 +5,4 @@ class TournamentConfig(AppConfig):
     name = 'tournament'
 
     def ready(self):
-        import tournament.signals  # This ensures signals are connected 
+        import tournament.signals  # This ensures signals are connected when Django starts

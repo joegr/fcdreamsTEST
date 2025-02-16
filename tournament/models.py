@@ -90,6 +90,8 @@ class Tournament(models.Model):
         ],
         default='REGISTRATION'
     )
+    group_stage_complete = models.BooleanField(default=False)
+    knockout_stage_complete = models.BooleanField(default=False)
 
     def clean(self):
         if self.number_of_groups * self.teams_per_group < 2:
@@ -120,7 +122,7 @@ class Tournament(models.Model):
             }
         )
 
-@receiver(pre_save, sender=Tournament)
+@receiver(pre_save, sender=Tournament, dispatch_uid='log_tournament_update')
 def log_tournament_update(sender, instance, **kwargs):
     if instance.id:  # Only log updates, not creation
         old_instance = Tournament.objects.get(id=instance.id)
@@ -129,6 +131,7 @@ def log_tournament_update(sender, instance, **kwargs):
                 'STATUS_CHANGE',
                 f"Tournament status changed from {old_instance.status} to {instance.status}"
             )
+
 
 class Team(models.Model):
     slug = models.SlugField(
@@ -218,14 +221,10 @@ class Team(models.Model):
         return f"{self.name} ({self.player_count} players)"
 
 class Match(models.Model):
-    slug = models.SlugField(
-        unique=True, 
-        editable=False,
-        default=''
-    )
+    slug = models.SlugField(unique=True, editable=False, default='')
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE)
-    team_home = models.ForeignKey(Team, related_name='home_matches', on_delete=models.CASCADE, blank=True, null=True)
-    team_away = models.ForeignKey(Team, related_name='away_matches', on_delete=models.CASCADE, blank=True, null=True)
+    team_home = models.ForeignKey(Team, related_name='home_matches', on_delete=models.CASCADE)
+    team_away = models.ForeignKey(Team, related_name='away_matches', on_delete=models.CASCADE)
     match_date = models.DateTimeField()
     home_score = models.IntegerField(null=True, blank=True)
     away_score = models.IntegerField(null=True, blank=True)
@@ -233,7 +232,7 @@ class Match(models.Model):
         max_length=20,
         choices=[
             ('GROUP', 'Group Stage'),
-            ('RO16', 'Round of 16'),
+            ('RO16', 'Round of 16'), 
             ('QUARTER', 'Quarter Final'),
             ('SEMI', 'Semi Final'),
             ('FINAL', 'Final')
@@ -250,11 +249,21 @@ class Match(models.Model):
         ],
         default='SCHEDULED'
     )
-    extra_time = models.BooleanField(default=False)
-    penalties = models.BooleanField(default=False)
+    confirmed = models.BooleanField(default=False)
+    dispute_reason = models.TextField(blank=True)
 
-    class Meta:
-        unique_together = ['tournament', 'team_home', 'team_away', 'stage']
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        if not self.slug:
+            self.slug = f"{self.stage}-{self.team_home}-{self.team_away}"
+        super().save(*args, **kwargs)
+        
+        if is_new:
+            Result.objects.create(
+                match=self,
+                team_home=self.team_home,
+                team_away=self.team_away
+            )
 
     def clean(self):
         if self.team_home == self.team_away:
@@ -262,18 +271,11 @@ class Match(models.Model):
         if self.team_home.tournament != self.tournament or self.team_away.tournament != self.tournament:
             raise ValidationError("Teams must belong to this tournament")
 
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            timestamp = timezone.now().strftime('%Y%m%d%H%M')
-            unique_id = str(uuid.uuid4())[:8]
-            home_name = self.team_home.name if self.team_home else 'tbd'
-            away_name = self.team_away.name if self.team_away else 'tbd'
-            self.slug = f"{timestamp}_match_{slugify(home_name)}_{slugify(away_name)}_{unique_id}"
-        self.full_clean()
-        super().save(*args, **kwargs)
+    class Meta:
+        unique_together = ['tournament', 'team_home', 'team_away', 'stage']
 
     def __str__(self):
-        return f"{self.team_home} vs {self.team_away}"
+        return f"{self.stage}: {self.team_home} vs {self.team_away}"
 
     def log_match_result(self):
         """Log match results"""
@@ -289,68 +291,26 @@ class Match(models.Model):
             }
         )
 
+# Add signal handler as backup
+@receiver(post_save, sender=Match)
+def create_match_result(sender, instance, created, **kwargs):
+    """Create Result when Match is created"""
+    if created and not hasattr(instance, 'result'):
+        Result.objects.create(
+            match=instance,
+            team_home=instance.team_home,
+            team_away=instance.team_away,
+            home_score=0,
+            away_score=0
+        )
+
 class Result(models.Model):
-    slug = models.SlugField(
-        unique=True, 
-        editable=False,
-        default=''
-    )
-    match = models.OneToOneField(Match, on_delete=models.CASCADE, related_name='result')
-    home_score = models.IntegerField(null=True, blank=True)
-    away_score = models.IntegerField(null=True, blank=True)
-    extra_time = models.BooleanField(default=False)
-    penalties = models.BooleanField(default=False)
-    home_team_confirmed = models.BooleanField(default=False)
-    away_team_confirmed = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            timestamp = timezone.now().strftime('%Y%m%d%H%M')
-            unique_id = str(uuid.uuid4())[:8]
-            self.slug = f"{timestamp}_result_{self.match.slug}_{unique_id}"
-        super().save(*args, **kwargs)
-
-    def confirm_result(self, team, score_data):
-        """Confirm result for a team"""
-        is_home = team == self.match.team_home
-        if is_home:
-            self.home_team_confirmed = True
-            if not self.home_score:
-                self.home_score = score_data['score']
-        else:
-            self.away_team_confirmed = True
-            if not self.away_score:
-                self.away_score = score_data['score']
-
-        self.extra_time = score_data.get('extra_time', False)
-        self.penalties = score_data.get('penalties', False)
-        self.save()
-
-        # If both teams confirmed and scores match, update match status
-        if self.home_team_confirmed and self.away_team_confirmed:
-            self.match.status = 'CONFIRMED'
-            self.match.home_score = self.home_score
-            self.match.away_score = self.away_score
-            self.match.save()
-
-    def submit_result_image(self, team, image, data):
-        """Handle result submission with image verification"""
-        is_home = team == self.match.team_home
-        
-        # Save image for OCR processing
-        image_field = 'home_score_img' if is_home else 'away_score_img'
-        setattr(self, image_field, image)
-        self.save()
-        
-        # Process OCR and verify scores
-        ocr_score = self._process_ocr(image)
-        if ocr_score == data['score']:
-            self.confirm_result(team, data)
-        else:
-            self.match.status = 'DISPUTED'
-            self.match.save()
+    match = models.ForeignKey(Match, on_delete=models.CASCADE)
+    team_home = models.ForeignKey(Team, related_name='home_results', on_delete=models.CASCADE)
+    team_away = models.ForeignKey(Team, related_name='away_results', on_delete=models.CASCADE)
+    home_score = models.IntegerField(default=0)
+    away_score = models.IntegerField(default=0)
+    confirmed = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"{self.match} - {self.match.team_home} vs {self.match.team_away}"
+        return f"{self.match} - {self.team_home} vs {self.team_away}"

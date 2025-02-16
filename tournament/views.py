@@ -688,3 +688,34 @@ def bracket_image(request, tournament_id):
     tournament = Tournament.objects.get(id=tournament_id)
     bracket_image = generate_bracket_image(tournament)
     return HttpResponse(bracket_image.getvalue(), content_type='image/png')
+
+class DashboardView(LoginRequiredMixin, TemplateView):
+    template_name = 'tournament/dashboard.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        context['tournaments'] = Tournament.objects.filter(is_active=True)
+        context['user_teams'] = Team.objects.filter(manager=user)
+        context['recent_matches'] = Match.objects.filter(
+            tournament__is_active=True
+        ).order_by('-match_date')[:5]
+        return context
+
+class SubmitResultView(LoginRequiredMixin, CreateView):
+    model = Result
+    template_name = 'tournament/submit_result.html'
+    fields = ['home_score', 'away_score']
+    success_url = reverse_lazy('dashboard')
+
+    def form_valid(self, form):
+        match = get_object_or_404(Match, id=self.kwargs['match_id'])
+        form.instance.match = match
+        form.instance.team_home = match.team_home
+        form.instance.team_away = match.team_away
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['match'] = get_object_or_404(Match, id=self.kwargs['match_id'])
+        return context

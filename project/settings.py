@@ -40,6 +40,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'tournament', # Add the app to the installed apps
+    'tournament.templatetags',
+    'tests',
+    'factory_boy'
 ]
 
 REST_FRAMEWORK = {
@@ -138,3 +141,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/'
 LOGIN_URL = '/accounts/login/'
+
+# Test Configuration
+TEST_RUNNER = 'django.test.runner.DiscoverRunner'

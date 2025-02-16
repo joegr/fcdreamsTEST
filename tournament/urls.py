@@ -9,7 +9,8 @@ from .views import (
     TournamentStandingsView, TournamentBracketView,
     GroupStageView, UserDashboardView,
     CustomLoginView, AdminDashboardView,
-    PlayerDashboardView, submit_result, bracket_image
+    PlayerDashboardView, submit_result, bracket_image,
+    DashboardView, SubmitResultView
 )
 from django.contrib.auth import views as auth_views
 
@@ -60,4 +61,8 @@ urlpatterns = [
     # New paths
     path('match/<int:match_id>/submit/', submit_result, name='submit_result'),
     path('tournament/<int:tournament_id>/bracket/image/', bracket_image, name='bracket_image'),
+    
+    # Suggested paths
+    path('dashboard/', DashboardView.as_view(), name='dashboard'),
+    path('submit-result/', SubmitResultView.as_view(), name='submit-result'),
 ]
