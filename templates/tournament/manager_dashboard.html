@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Manager Dashboard</h1>
+    
+    <!-- Teams Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2>Your Teams</h2>
+        </div>
+        <div class="card-body">
+            {% if teams %}
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Team Name</th>
+                                <th>Players</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for team in teams %}
+                            <tr>
+                                <td>{{ team.name }}</td>
+                                <td>{{ team.player_count }}/14</td>
+                                <td>
+                                    {% if team.registration_complete %}
+                                        <span class="badge bg-success">Complete</span>
+                                    {% else %}
+                                        <span class="badge bg-warning">Incomplete</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="{% url 'team_detail' team.pk %}" class="btn btn-sm btn-primary">View Details</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p>You haven't registered any teams yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Upcoming Matches Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2>Upcoming Matches</h2>
+        </div>
+        <div class="card-body">
+            {% if upcoming_matches %}
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Home Team</th>
+                                <th>Away Team</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for match in upcoming_matches %}
+                            <tr>
+                                <td>{{ match.match_date }}</td>
+                                <td>{{ match.team_home }}</td>
+                                <td>{{ match.team_away }}</td>
+                                <td>
+                                    <a href="{% url 'submit_result' match.pk %}" class="btn btn-sm btn-primary">Submit Result</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p>No upcoming matches scheduled.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Pending Results Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2>Pending Results</h2>
+        </div>
+        <div class="card-body">
+            {% if pending_results %}
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Match</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for match in pending_results %}
+                            <tr>
+                                <td>{{ match.team_home }} vs {{ match.team_away }}</td>
+                                <td>Pending Confirmation</td>
+                                <td>
+                                    <a href="{% url 'confirm_result' match.pk %}" class="btn btn-sm btn-warning">Confirm Result</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p>No pending results to confirm.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Recent Matches Section -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Recent Matches</h2>
+        </div>
+        <div class="card-body">
+            {% if recent_matches %}
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Match</th>
+                                <th>Score</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for match in recent_matches %}
+                            <tr>
+                                <td>{{ match.match_date }}</td>
+                                <td>{{ match.team_home }} vs {{ match.team_away }}</td>
+                                <td>{{ match.home_score }} - {{ match.away_score }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p>No recent matches played.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %} 

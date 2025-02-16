@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="user-header">
+        <h1>Welcome, {{ user.username }}!</h1>
+    </div>
+
+    <div class="dashboard-grid">
+        <!-- Teams Section -->
+        <div class="dashboard-section">
+            <h2>Your Teams</h2>
+            {% if managed_teams %}
+                {% for team in managed_teams %}
+                <div class="team-card">
+                    <h3>{{ team.name }}</h3>
+                    <p>Players: {{ team.player_count }}/14</p>
+                    <p>Tournament: {{ team.tournament.name }}</p>
+                    <p>Status: 
+                        {% if team.registration_complete %}
+                            <span class="status-complete">Complete</span>
+                        {% else %}
+                            <span class="status-pending">Pending ({{ team.player_count }}/8 min players)</span>
+                        {% endif %}
+                    </p>
+                    <a href="{% url 'team_detail' team.pk %}" class="btn btn-primary">Manage Team</a>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p>You don't manage any teams yet.</p>
+                <a href="{% url 'team-list' %}" class="btn btn-primary">Create a Team</a>
+            {% endif %}
+        </div>
+
+        <!-- Upcoming Matches Section -->
+        <div class="dashboard-section">
+            <h2>Upcoming Matches</h2>
+            {% if upcoming_matches %}
+                {% for match in upcoming_matches %}
+                <div class="match-card">
+                    <div class="match-date">{{ match.match_date }}</div>
+                    <div class="match-teams">
+                        {{ match.team_home.name }} vs {{ match.team_away.name }}
+                    </div>
+                    <div class="match-tournament">
+                        {{ match.tournament.name }}
+                    </div>
+                    <a href="{% url 'submit_result' match.pk %}" class="btn btn-secondary">Submit Result</a>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p>No upcoming matches scheduled.</p>
+            {% endif %}
+        </div>
+
+        <!-- Active Tournaments Section -->
+        <div class="dashboard-section">
+            <h2>Active Tournaments</h2>
+            {% if active_tournaments %}
+                {% for tournament in active_tournaments %}
+                <div class="tournament-card">
+                    <h3>{{ tournament.name }}</h3>
+                    <p>Status: {{ tournament.get_status_display }}</p>
+                    <div class="tournament-links">
+                        <a href="{% url 'tournament_standings' tournament.pk %}">Standings</a>
+                        {% if tournament.status == 'GROUP_STAGE' %}
+                            <a href="{% url 'tournament_group_stage' tournament.pk %}">Group Stage</a>
+                        {% elif tournament.status == 'KNOCKOUT' %}
+                            <a href="{% url 'tournament_bracket' tournament.pk %}">Bracket</a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p>No active tournaments at the moment.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+.dashboard-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.user-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.dashboard-section {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.team-card, .match-card, .tournament-card {
+    background: #f8f9fa;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 6px;
+}
+
+.status-complete {
+    color: green;
+    font-weight: bold;
+}
+
+.status-pending {
+    color: orange;
+    font-weight: bold;
+}
+
+.btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 4px;
+    text-decoration: none;
+    margin-top: 10px;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.tournament-links {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.tournament-links a {
+    color: #007bff;
+    text-decoration: none;
+}
+</style>
+{% endblock %} 

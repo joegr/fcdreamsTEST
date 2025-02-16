@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% load tournament_tags %}
+
+{% block content %}
+<h1>{{ tournament.name }} - Group Stage</h1>
+
+{% if messages %}
+<div class="messages">
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags }}">
+        {{ message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if groups_not_generated %}
+    <div class="alert alert-info">
+        The group stage has not been generated yet. Please wait for the tournament administrator to generate the groups.
+    </div>
+{% elif error %}
+    <div class="alert alert-danger">
+        {{ error }}
+    </div>
+{% else %}
+    {% for group_num, group_data in standings.items %}
+        <div class="group-section">
+            <h2>Group {{ group_num|add:1 }}</h2>
+            
+            <h3>Standings</h3>
+            <table class="standings-table">
+                <thead>
+                    <tr>
+                        <th>Team</th>
+                        <th>Points</th>
+                        <th>GF</th>
+                        <th>GA</th>
+                        <th>GD</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for team_stats in group_data %}
+                    <tr>
+                        <td>{{ team_stats.team.name }}</td>
+                        <td>{{ team_stats.points }}</td>
+                        <td>{{ team_stats.goals_for }}</td>
+                        <td>{{ team_stats.goals_against }}</td>
+                        <td>{{ team_stats.goal_difference }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <h3>Matches</h3>
+            <div class="matches-list">
+                {% for match in group_matches|get_item:group_num %}
+                <div class="match-card">
+                    <div class="match-date">{{ match.match_date }}</div>
+                    <div class="match-teams">
+                        {{ match.team_home.name }} 
+                        {% if match.status == 'CONFIRMED' %}
+                            {{ match.home_score }} - {{ match.away_score }}
+                        {% else %}
+                            vs
+                        {% endif %}
+                        {{ match.team_away.name }}
+                    </div>
+                    <div class="match-status">{{ match.get_status_display }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endfor %}
+{% endif %}
+{% endblock %} 

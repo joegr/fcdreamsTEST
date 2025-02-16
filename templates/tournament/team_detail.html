@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="card">
+        <div class="card-header">
+            <h1>{{ team.name }}</h1>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <h3>Team Information</h3>
+                    <table class="table">
+                        <tr>
+                            <th>Manager:</th>
+                            <td>{{ team.manager.username }}</td>
+                        </tr>
+                        <tr>
+                            <th>Email:</th>
+                            <td>{{ team.email }}</td>
+                        </tr>
+                        <tr>
+                            <th>Contact Phone:</th>
+                            <td>{{ team.contact_phone }}</td>
+                        </tr>
+                        <tr>
+                            <th>Registration Code:</th>
+                            <td>{{ team.registration_code }}</td>
+                        </tr>
+                        <tr>
+                            <th>Players:</th>
+                            <td>{{ team.player_count }}/14</td>
+                        </tr>
+                        <tr>
+                            <th>Status:</th>
+                            <td>
+                                {% if team.registration_complete %}
+                                    <span class="badge bg-success">Registration Complete</span>
+                                {% else %}
+                                    <span class="badge bg-warning">Registration Incomplete</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h3>Tournament Information</h3>
+                    <table class="table">
+                        <tr>
+                            <th>Tournament:</th>
+                            <td>{{ team.tournament.name }}</td>
+                        </tr>
+                        <tr>
+                            <th>Tournament Date:</th>
+                            <td>{{ team.tournament.datetime }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

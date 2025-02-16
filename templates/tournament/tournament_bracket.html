@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<style>
+    .tournament-bracket {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-around;
+        padding: 20px;
+        overflow-x: auto;
+    }
+
+    .bracket-round {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-around;
+        min-width: 250px;
+        margin: 0 10px;
+    }
+
+    .match-card {
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 10px;
+        margin: 10px 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .match-team {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .match-team:last-child {
+        border-bottom: none;
+    }
+
+    .match-score {
+        font-weight: bold;
+        min-width: 30px;
+        text-align: right;
+    }
+
+    .match-winner {
+        background-color: #e8f5e9;
+    }
+
+    .match-date {
+        font-size: 0.8em;
+        color: #666;
+        text-align: center;
+        margin-top: 5px;
+    }
+
+    .group-stage {
+        background: #f8f9fa;
+        padding: 20px;
+        margin-bottom: 30px;
+        border-radius: 8px;
+    }
+
+    .group-title {
+        margin-bottom: 15px;
+        color: #2c3e50;
+    }
+
+    .stage-title {
+        text-align: center;
+        margin-bottom: 15px;
+        color: #2c3e50;
+        font-weight: bold;
+    }
+
+    .connector {
+        border-right: 2px solid #ddd;
+        height: 20px;
+        margin-right: -10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <h1 class="text-center mb-4">{{ tournament.name }} - Tournament Bracket</h1>
+
+    {% if group_matches %}
+    <div class="group-stage">
+        <h2 class="group-title">Group Stage</h2>
+        <div class="row">
+            {% regroup group_matches by team_home.tournament as group_matches_by_group %}
+            {% for group in group_matches_by_group %}
+            <div class="col-md-3 mb-4">
+                <h3 class="mb-3">Group {{ forloop.counter }}</h3>
+                {% for match in group.list %}
+                <div class="match-card">
+                    <div class="match-team {% if match.home_score > match.away_score %}match-winner{% endif %}">
+                        {{ match.team_home.name }}
+                        {% if match.status == 'CONFIRMED' %}
+                        <span class="match-score">{{ match.home_score }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="match-team {% if match.away_score > match.home_score %}match-winner{% endif %}">
+                        {{ match.team_away.name }}
+                        {% if match.status == 'CONFIRMED' %}
+                        <span class="match-score">{{ match.away_score }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="match-date">{{ match.match_date|date:"M d, Y" }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="tournament-bracket">
+        {% if ro16_matches %}
+        <div class="bracket-round">
+            <h3 class="stage-title">Round of 16</h3>
+            {% for match in ro16_matches %}
+            <div class="match-card">
+                <div class="match-team {% if match.home_score > match.away_score %}match-winner{% endif %}">
+                    {{ match.team_home.name }}
+                    {% if match.status == 'CONFIRMED' %}
+                    <span class="match-score">{{ match.home_score }}</span>
+                    {% endif %}
+                </div>
+                <div class="match-team {% if match.away_score > match.home_score %}match-winner{% endif %}">
+                    {{ match.team_away.name }}
+                    {% if match.status == 'CONFIRMED' %}
+                    <span class="match-score">{{ match.away_score }}</span>
+                    {% endif %}
+                </div>
+                <div class="match-date">{{ match.match_date|date:"M d, Y" }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if quarter_matches %}
+        <div class="bracket-round">
+            <h3 class="stage-title">Quarter Finals</h3>
+            {% for match in quarter_matches %}
+            <div class="match-card">
+                <div class="match-team {% if match.home_score > match.away_score %}match-winner{% endif %}">
+                    {{ match.team_home.name }}
+                    {% if match.status == 'CONFIRMED' %}
+                    <span class="match-score">{{ match.home_score }}</span>
+                    {% endif %}
+                </div>
+                <div class="match-team {% if match.away_score > match.home_score %}match-winner{% endif %}">
+                    {{ match.team_away.name }}
+                    {% if match.status == 'CONFIRMED' %}
+                    <span class="match-score">{{ match.away_score }}</span>
+                    {% endif %}
+                </div>
+                <div class="match-date">{{ match.match_date|date:"M d, Y" }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if semi_matches %}
+        <div class="bracket-round">
+            <h3 class="stage-title">Semi Finals</h3>
+            {% for match in semi_matches %}
+            <div class="match-card">
+                <div class="match-team {% if match.home_score > match.away_score %}match-winner{% endif %}">
+                    {{ match.team_home.name }}
+                    {% if match.status == 'CONFIRMED' %}
+                    <span class="match-score">{{ match.home_score }}</span>
+                    {% endif %}
+                </div>
+                <div class="match-team {% if match.away_score > match.home_score %}match-winner{% endif %}">
+                    {{ match.team_away.name }}
+                    {% if match.status == 'CONFIRMED' %}
+                    <span class="match-score">{{ match.away_score }}</span>
+                    {% endif %}
+                </div>
+                <div class="match-date">{{ match.match_date|date:"M d, Y" }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if final_match %}
+        <div class="bracket-round">
+            <h3 class="stage-title">Final</h3>
+            <div class="match-card">
+                <div class="match-team {% if final_match.home_score > final_match.away_score %}match-winner{% endif %}">
+                    {{ final_match.team_home.name }}
+                    {% if final_match.status == 'CONFIRMED' %}
+                    <span class="match-score">{{ final_match.home_score }}</span>
+                    {% endif %}
+                </div>
+                <div class="match-team {% if final_match.away_score > final_match.home_score %}match-winner{% endif %}">
+                    {{ final_match.team_away.name }}
+                    {% if final_match.status == 'CONFIRMED' %}
+                    <span class="match-score">{{ final_match.away_score }}</span>
+                    {% endif %}
+                </div>
+                <div class="match-date">{{ final_match.match_date|date:"M d, Y" }}</div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %} 

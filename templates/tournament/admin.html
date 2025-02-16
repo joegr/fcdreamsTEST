@@ -1,0 +1,27 @@
+<!-- templates/tournament/admin.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Tournament Administration</h2>
+
+<h3>Tournaments</h3>
+<ul>
+{% for tournament in tournaments %}
+    <li>{{ tournament.name }} ({{ tournament.start_date }})</li>
+{% endfor %}
+</ul>
+
+<h3>Pending Team Registrations</h3>
+<ul>
+{% for team in pending_teams %}
+    <li>{{ team.name }} - {{ team.manager }}</li>
+{% endfor %}
+</ul>
+
+<h3>Pending Results</h3>
+<ul>
+{% for result in pending_results %}
+    <li>Match {{ result.match.match_id }}: {{ result.team.name }}</li>
+{% endfor %}
+</ul>
+{% endblock %}

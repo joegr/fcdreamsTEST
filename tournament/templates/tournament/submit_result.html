@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h2>Submit Result - {{ match }}</h2>
+    
+    <!-- Tournament Bracket -->
+    <div class="bracket-container">
+        <canvas id="bracketCanvas"></canvas>
+    </div>
+
+    <!-- Result Submission Form -->
+    <form method="post" class="mt-4">
+        {% csrf_token %}
+        <div class="form-group">
+            <label>{{ match.team_home.name }} Score</label>
+            <input type="number" name="home_score" class="form-control" min="0" required>
+        </div>
+        <div class="form-group">
+            <label>{{ match.team_away.name }} Score</label>
+            <input type="number" name="away_score" class="form-control" min="0" required>
+        </div>
+        <div class="form-check mt-3">
+            <input type="checkbox" name="extra_time" class="form-check-input" id="extra_time">
+            <label class="form-check-label" for="extra_time">Extra Time</label>
+        </div>
+        <div class="form-check mt-2">
+            <input type="checkbox" name="penalties" class="form-check-input" id="penalties">
+            <label class="form-check-label" for="penalties">Penalties</label>
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Submit Result</button>
+    </form>
+</div>
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const ctx = document.getElementById('bracketCanvas').getContext('2d');
+    
+    // Get tournament data from Django template
+    const tournamentData = {{ tournament_data|safe }};
+    
+    // Create custom bracket chart
+    new Chart(ctx, {
+        type: 'bracket',
+        data: {
+            labels: tournamentData.teams,
+            datasets: [{
+                data: tournamentData.matches,
+                backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                borderColor: 'rgba(0, 123, 255, 1)',
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const match = tournamentData.matches[context.dataIndex];
+                            if (match.status === 'CONFIRMED') {
+                                return `${match.team_home} ${match.home_score} - ${match.away_score} ${match.team_away}`;
+                            }
+                            return `${match.team_home} vs ${match.team_away}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+});
+</script>
+{% endblock %}
+
+<style>
+.bracket-container {
+    height: 400px;
+    margin: 20px auto;
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.form-group {
+    margin-bottom: 1rem;
+}
+.form-check {
+    padding-left: 1.5rem;
+}
+</style>
+{% endblock %} 

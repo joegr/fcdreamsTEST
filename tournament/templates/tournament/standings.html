@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>{{ tournament.name }} - Standings</h1>
+
+{% if messages %}
+<div class="messages">
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags }}">
+        {{ message }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="tournament-standings">
+    <table class="standings-table">
+        <thead>
+            <tr>
+                <th>Position</th>
+                <th>Team</th>
+                <th>Players</th>
+                <th>Registration</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for team in teams %}
+            <tr>
+                <td>{{ forloop.counter }}</td>
+                <td>{{ team.name }}</td>
+                <td>{{ team.player_count }}/14</td>
+                <td>
+                    {% if team.registration_complete %}
+                        Complete
+                    {% else %}
+                        Pending
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<style>
+.standings-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+}
+
+.standings-table th,
+.standings-table td {
+    padding: 0.5em;
+    border: 1px solid #ddd;
+    text-align: center;
+}
+
+.standings-table th {
+    background-color: #f5f5f5;
+    font-weight: bold;
+}
+
+.messages {
+    margin-bottom: 1em;
+}
+
+.alert {
+    padding: 1em;
+    margin-bottom: 0.5em;
+    border-radius: 4px;
+}
+</style>
+{% endblock %} 
