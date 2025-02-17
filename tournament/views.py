@@ -545,6 +545,7 @@ class TournamentBracketView(DetailView):
         return context
 
 class GroupStageView(LoginRequiredMixin, DetailView):
+    """Display group stage standings and matches"""
     model = Tournament
     template_name = 'tournament/group_stage.html'
     context_object_name = 'tournament'
@@ -552,44 +553,20 @@ class GroupStageView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         tournament = self.get_object()
+        service = GroupStageService(tournament)
         
-        if tournament.status != 'GROUP_STAGE':
-            messages.error(self.request, "Tournament is not in group stage")
-            return context
-            
-        group_service = GroupStageService(tournament)
-        
-        try:
-            # First check if there are any group stage matches
-            if not Match.objects.filter(tournament=tournament, stage='GROUP').exists():
-                messages.warning(self.request, "Groups have not been generated yet")
-                context['groups_not_generated'] = True
-                return context
-                
-            context['standings'] = group_service.get_group_standings()
-            
-            # Get all group stage matches organized by group
-            group_matches = {}
-            matches = Match.objects.filter(
+        context.update({
+            'groups': service.get_group_standings(),
+            'matches': Match.objects.filter(
                 tournament=tournament,
                 stage='GROUP'
-            ).select_related('team_home', 'team_away').order_by('match_date')
-            
-            for match in matches:
-                # Determine which group this match belongs to
-                for group_num, teams in group_service.groups.items():
-                    if match.team_home in teams and match.team_away in teams:
-                        if group_num not in group_matches:
-                            group_matches[group_num] = []
-                        group_matches[group_num].append(match)
-                        break
-                        
-            context['group_matches'] = group_matches
-            
-        except Exception as e:
-            messages.error(self.request, f"Error loading group stage: {str(e)}")
-            context['error'] = str(e)
-            
+            ).select_related(
+                'team_home',
+                'team_away', 
+                'result'
+            ).order_by('match_date')
+        })
+        
         return context
 
 class UserDashboardView(LoginRequiredMixin, TemplateView):
@@ -690,16 +667,34 @@ def bracket_image(request, tournament_id):
     return HttpResponse(bracket_image.getvalue(), content_type='image/png')
 
 class DashboardView(LoginRequiredMixin, TemplateView):
+    """Main dashboard showing active tournaments and user's teams"""
     template_name = 'tournament/dashboard.html'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         user = self.request.user
-        context['tournaments'] = Tournament.objects.filter(is_active=True)
-        context['user_teams'] = Team.objects.filter(manager=user)
-        context['recent_matches'] = Match.objects.filter(
-            tournament__is_active=True
-        ).order_by('-match_date')[:5]
+        
+        # Get active tournaments
+        context['tournaments'] = Tournament.objects.filter(
+            is_active=True
+        ).select_related('organizer')
+        
+        # Get user's teams with their matches
+        context['teams'] = Team.objects.filter(
+            manager=user
+        ).select_related('tournament')
+        
+        # Get recent matches for user's teams
+        user_teams = context['teams']
+        context['matches'] = Match.objects.filter(
+            models.Q(team_home__in=user_teams) | 
+            models.Q(team_away__in=user_teams)
+        ).select_related(
+            'team_home', 
+            'team_away',
+            'result'
+        ).order_by('match_date')
+        
         return context
 
 class SubmitResultView(LoginRequiredMixin, CreateView):
@@ -719,3 +714,51 @@ class SubmitResultView(LoginRequiredMixin, CreateView):
         context = super().get_context_data(**kwargs)
         context['match'] = get_object_or_404(Match, id=self.kwargs['match_id'])
         return context
+
+class MatchResultView(LoginRequiredMixin, DetailView):
+    """Handle match result submission and confirmation"""
+    model = Match
+    template_name = 'tournament/match_result.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        match = self.get_object()
+        user_team = self.request.user.team_set.first()
+        
+        context.update({
+            'user_team': user_team,
+            'can_submit': match.status == 'SCHEDULED',
+            'is_home_team': user_team == match.team_home,
+            'result': match.result
+        })
+        
+        return context
+        
+    def post(self, request, *args, **kwargs):
+        match = self.get_object()
+        user_team = request.user.team_set.first()
+        
+        if match.status != 'SCHEDULED':
+            messages.error(request, "Match result cannot be submitted")
+            return redirect('match_detail', pk=match.pk)
+            
+        try:
+            score = int(request.POST['score'])
+            if score < 0:
+                raise ValueError("Score cannot be negative")
+                
+            result = match.result
+            if user_team == match.team_home:
+                result.home_score = score
+                result.home_confirmed = True
+            else:
+                result.away_score = score  
+                result.away_confirmed = True
+            result.save()
+            
+            messages.success(request, "Result submitted successfully")
+            return redirect('match_detail', pk=match.pk)
+            
+        except ValueError as e:
+            messages.error(request, str(e))
+            return redirect('match_detail', pk=match.pk)
