@@ -51,29 +51,28 @@ class TournamentService:
         Process a match result submission from a team.
         Creates a Result object and updates match if both teams have submitted.
         """
-        # Create the result submission
-        result = Result.objects.create(
+        result, created = Result.objects.get_or_create(
             match=match,
             team_home=submitting_team if submitting_team == match.team_home else match.team_home,
             team_away=match.team_away,
-            home_score=our_score if submitting_team == match.team_home else opponent_score,
-            away_score=opponent_score if submitting_team == match.team_home else our_score,
         )
 
-        # Check if both teams have submitted results
-        match_results = Result.objects.filter(match=match)
-        if match_results.count() == 2:
-            # Verify results match
-            if TournamentService._verify_matching_results(match_results):
-                match.home_score = result.home_score
-                match.away_score = result.away_score
-                match.extra_time = extra_time
-                match.penalties = penalties
-                match.status = 'CONFIRMED'
-                match.save()
-            else:
-                match.status = 'DISPUTED'
-                match.save()
+        # Update scores
+        if submitting_team == match.team_home:
+            result.home_score = our_score
+            result.away_score = opponent_score
+            result.home_confirmed = True
+        else:
+            result.home_score = opponent_score
+            result.away_score = our_score
+            result.away_confirmed = True
+
+        result.save()
+
+        # Check if both teams have confirmed
+        if result.home_confirmed and result.away_confirmed:
+            match.status = 'CONFIRMED'
+            match.save()
 
         return result
 
