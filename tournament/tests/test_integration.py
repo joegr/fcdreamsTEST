@@ -1,8 +1,10 @@
 
 from django.test import TestCase
-from ..models import Tournament, Team, Match
-from ..services.tournament import TournamentService
-# ...existing imports...
+from tournament.models import Tournament, Team, Match
+from tournament.services.tournament import TournamentService
+from tournament.services.group_stage import GroupStageService
+from tournament.tests.factories import TournamentFactory, TeamFactory
+
 
 # Move TournamentProgressionTest here
 # Keep the integration test that verifies full tournament flow
