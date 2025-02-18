@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% load tournament_filters %}
+
+{% block content %}
+<div class="container">
+    <h1>Tournament Administration</h1>
+    
+    {% for tournament_card in tournament_cards %}
+    <div class="tournament-section">
+        <h2>{{ tournament_card.tournament.name }}</h2>
+        <div class="progress">
+            <div class="progress-bar" role="progressbar" 
+                 style="width: {{ tournament_card.completed_matches|div:tournament_card.total_matches|mul:100 }}%">
+                {{ tournament_card.completed_matches }}/{{ tournament_card.total_matches }} matches completed
+            </div>
+        </div>
+        
+        <div class="team-cards">
+            {% for team in tournament_card.teams %}
+            <div class="team-card {% if forloop.counter <= 2 %}qualified{% endif %}">
+                <h3>{{ team.team.name }}</h3>
+                <div class="stats">
+                    <p>Points: {{ team.points }}</p>
+                    <p>Played: {{ team.matches_played }}</p>
+                    <p>Goals: {{ team.goals_for }}:{{ team.goals_against }} ({{ team.goal_difference }})</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %} 

@@ -346,3 +346,36 @@ class TournamentService:
             status='SCHEDULED'
         )
         return match
+
+    def process_match_result(self, match: Match, submitting_team: Team, result_data: dict) -> Result:
+        """Process a match result submission"""
+        if match.status == 'CONFIRMED':
+            raise ValueError("Match already confirmed")
+
+        result, created = Result.objects.get_or_create(
+            match=match,
+            team_home=match.team_home,
+            team_away=match.team_away
+        )
+
+        # Update result based on submitting team
+        if submitting_team == match.team_home:
+            result.home_score = result_data['our_score']
+            result.away_score = result_data['opponent_score']
+            result.home_confirmed = True
+        else:
+            result.home_score = result_data['opponent_score']
+            result.away_score = result_data['our_score']
+            result.away_confirmed = True
+
+        result.extra_time = result_data.get('extra_time', False)
+        result.penalties = result_data.get('penalties', False)
+        result.save()
+
+        # Notify other team to confirm
+        if submitting_team == match.team_home:
+            notify_team_for_confirmation(match.team_away)
+        else:
+            notify_team_for_confirmation(match.team_home)
+
+        return result

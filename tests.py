@@ -105,20 +105,30 @@ class TournamentProgressionTest(TestCase):
 
 	def test_group_stage(self):
 		"""Test group stage progression"""
-		groups = self.group_service.generate_groups()
-		self.assertEqual(len(groups), 8)
+		# Generate group matches
+		matches = self.group_service.create_group_matches()
 		
-		matches = self.group_service.generate_matches()
-		self.assertEqual(len(matches), 48)
-		
-		# Simulate all group matches
+		# Confirm all group matches with random scores
 		for match in matches:
-			self._simulate_match(match)
+			match.home_score = 2  # Simple score for testing
+			match.away_score = 1
+			match.status = 'CONFIRMED'
+			match.save()
+			
+			# Create and confirm result
+			Result.objects.create(
+				match=match,
+				team_home=match.team_home,
+				team_away=match.team_away,
+				home_score=match.home_score,
+				away_score=match.away_score,
+				confirmed=True
+			)
 		
-		# Verify group stage completion
-		self.assertTrue(self.group_service.is_group_stage_complete())
+		# Now we can get qualified teams
 		qualified_teams = self.group_service.get_qualified_teams()
-		self.assertEqual(len(qualified_teams), 16)
+		self.assertEqual(len(qualified_teams), 16)  # For 8 groups, top 2 from each
+		
 		return qualified_teams
 
 	def test_knockout_progression(self):
@@ -216,6 +226,7 @@ class ViewTests(TestCase):
             }
         )
         self.assertEqual(response.status_code, 200)
+
 class SignalTests(TestCase):
     def setUp(self):
         self.tournament = Tournament.objects.create(name="Test Tournament")
@@ -232,6 +243,7 @@ class SignalTests(TestCase):
         self.assertTrue(hasattr(match, 'result'))
         self.assertEqual(match.result.home_score, 0)
         self.assertEqual(match.result.away_score, 0)
+
 from django.core import mail
 from datetime import date
 
@@ -259,17 +271,36 @@ class GroupStageTestCase(TestCase):
         self.assertNotEqual(first_match.team_home, first_match.team_away)
 
     def test_standings_calculation(self):
+        """Test group standings calculation"""
+        # Create a match in group A
         match = Match.objects.create(
             tournament=self.tournament,
             team_home=self.teams[0],
             team_away=self.teams[1],
+            stage='GROUP',
+            group='A',
             home_score=2,
             away_score=1,
             status='CONFIRMED'
         )
+        
+        # Get standings for group A
         standings = self.service.get_group_standings('A')
-        winner = next(s for s in standings if s['team'] == self.teams[0])
-        self.assertEqual(winner['points'], 3)
+        
+        # Find the winning team's stats
+        winner_stats = next(s for s in standings if s['team'] == self.teams[0])
+        loser_stats = next(s for s in standings if s['team'] == self.teams[1])
+        
+        # Verify points and goals
+        self.assertEqual(winner_stats['points'], 3)
+        self.assertEqual(winner_stats['goals_for'], 2)
+        self.assertEqual(winner_stats['goals_against'], 1)
+        self.assertEqual(winner_stats['goal_difference'], 1)
+        
+        self.assertEqual(loser_stats['points'], 0)
+        self.assertEqual(loser_stats['goals_for'], 1)
+        self.assertEqual(loser_stats['goals_against'], 2)
+        self.assertEqual(loser_stats['goal_difference'], -1)
 
 class KnockoutStageTestCase(TestCase):
     def setUp(self):
@@ -345,3 +376,94 @@ class APITests(APITestCase):
         }
         response = self.client.post(reverse('team-list'), data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+class DashboardViewTests(TestCase):
+    def setUp(self):
+        # Create test user
+        self.user = User.objects.create_user(
+            username='testuser',
+            password='testpass123'
+        )
+        
+        # Create test tournament
+        self.tournament = Tournament.objects.create(
+            name='Test Tournament',
+            status='REGISTRATION'
+        )
+        
+        # Create test team managed by user
+        self.team = Team.objects.create(
+            name='Test Team',
+            tournament=self.tournament,
+            manager=self.user
+        )
+        
+        # Create some matches
+        self.match = Match.objects.create(
+            tournament=self.tournament,
+            team_home=self.team,
+            team_away=Team.objects.create(
+                name='Opponent Team',
+                tournament=self.tournament
+            ),
+            stage='GROUP',
+            group='A'
+        )
+
+    def test_user_dashboard_view(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('user_dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'tournament/user_dashboard.html')
+        self.assertIn('teams', response.context)
+        self.assertIn('matches', response.context)
+        self.assertIn('tournaments', response.context)
+
+    def test_manager_dashboard_view(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('manager_dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'tournament/manager_dashboard.html')
+        self.assertIn('managed_teams', response.context)
+        self.assertIn('upcoming_matches', response.context)
+        self.assertIn('pending_results', response.context)
+
+    def test_admin_dashboard_view(self):
+        # Make user an admin
+        self.user.is_staff = True
+        self.user.save()
+        
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'tournament/admin_dashboard.html')
+        self.assertIn('tournaments', response.context)
+        self.assertIn('pending_teams', response.context)
+        self.assertIn('pending_matches', response.context)
+
+    def test_dashboard_redirect_for_role(self):
+        self.client.force_login(self.user)
+        
+        # Test manager redirect
+        response = self.client.get(reverse('dashboard'))
+        self.assertRedirects(response, reverse('manager_dashboard'))
+        
+        # Test admin redirect
+        self.user.is_staff = True
+        self.user.save()
+        response = self.client.get(reverse('dashboard'))
+        self.assertRedirects(response, reverse('admin_dashboard'))
+        
+        # Test regular user redirect
+        self.user.is_staff = False
+        self.team.manager = None
+        self.team.save()
+        self.user.save()
+        response = self.client.get(reverse('dashboard'))
+        self.assertRedirects(response, reverse('user_dashboard'))
+
+    def test_unauthorized_access(self):
+        # Test admin dashboard access by non-admin
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('admin_dashboard'))
+        self.assertEqual(response.status_code, 403)

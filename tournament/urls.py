@@ -63,6 +63,6 @@ urlpatterns = [
     path('tournament/<int:tournament_id>/bracket/image/', bracket_image, name='bracket_image'),
     
     # Suggested paths
-    path('dashboard/', DashboardView.as_view(), name='dashboard'),
+    path('', DashboardView.as_view(), name='dashboard'),
     path('submit-result/', SubmitResultView.as_view(), name='submit-result'),
 ]

@@ -1,6 +1,6 @@
 from django.contrib.auth.decorators import login_required
 from django.utils.decorators import method_decorator
-from django.views.generic import CreateView, TemplateView, DetailView, ListView
+from django.views.generic import CreateView, TemplateView, DetailView, ListView, View
 from django.contrib.auth.forms import UserCreationForm
 from django.urls import reverse_lazy
 from rest_framework import viewsets, status
@@ -21,7 +21,7 @@ from .services.knockout import KnockoutService
 from .tasks import validate_team_registration
 from .services.tournament import TournamentService
 from django.shortcuts import get_object_or_404, redirect, render
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import HttpResponseForbidden, HttpResponse
 from django.contrib import messages
 from django.urls import reverse
@@ -36,6 +36,10 @@ import io
 from django.core.serializers.json import DjangoJSONEncoder
 import json
 from rest_framework import serializers
+from heapq import heappush, heappop
+from dataclasses import dataclass
+from typing import List
+import itertools
 
 class SignUpView(CreateView):
     form_class = UserCreationForm
@@ -61,10 +65,123 @@ class SignUpView(CreateView):
         
         return response
 
-@method_decorator(login_required, name='dispatch')
-class TournamentAdminView(TemplateView):
-    template_name = 'tournament/admin_dashboard.html'
+@dataclass
+class TeamCard:
+    team: Team
+    points: int = 0
+    goal_difference: int = 0
+    goals_for: int = 0
+    goals_against: int = 0
+    matches_played: int = 0
+    entry_count: int = 0  # For stable sorting
+    REMOVED = '<removed>'  # Placeholder for removed teams
     
+    def __post_init__(self):
+        self.entry_count = next(itertools.count())
+    
+    def __lt__(self, other):
+        # For heapq sorting: higher points/goals first (use negative)
+        return (-self.points, -self.goal_difference, -self.goals_for, 
+                self.entry_count) < (-other.points, -other.goal_difference, 
+                -other.goals_for, other.entry_count)
+
+class TournamentStandings:
+    def __init__(self):
+        self.team_heap = []  # List of entries arranged in a heap
+        self.entry_finder = {}  # Mapping of teams to entries
+        self.counter = itertools.count()  # Unique sequence count
+        
+    def add_team(self, team_card: TeamCard):
+        'Add a new team or update existing team stats'
+        if team_card.team in self.entry_finder:
+            self.remove_team(team_card.team)
+        entry = team_card
+        self.entry_finder[team_card.team] = entry
+        heappush(self.team_heap, entry)
+    
+    def remove_team(self, team: Team):
+        'Mark an existing team as REMOVED'
+        entry = self.entry_finder.pop(team)
+        entry.team = TeamCard.REMOVED
+    
+    def pop_team(self):
+        'Remove and return the highest ranked team'
+        while self.team_heap:
+            team_card = heappop(self.team_heap)
+            if team_card.team is not TeamCard.REMOVED:
+                del self.entry_finder[team_card.team]
+                return team_card
+        raise KeyError('pop from an empty tournament standings')
+
+class TournamentAdminView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
+    template_name = 'tournament/tournament_admin.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        tournaments = Tournament.objects.all()
+        
+        tournament_cards = []
+        for tournament in tournaments:
+            standings = TournamentStandings()
+            
+            # Get all matches in tournament
+            matches = Match.objects.filter(
+                tournament=tournament,
+                status='CONFIRMED'
+            ).select_related('team_home', 'team_away')
+            
+            # Process all teams
+            team_stats = {}
+            for match in matches:
+                for team, is_home in [(match.team_home, True), (match.team_away, False)]:
+                    if team not in team_stats:
+                        team_stats[team] = TeamCard(team=team)
+                    
+                    card = team_stats[team]
+                    card.matches_played += 1
+                    
+                    if is_home:
+                        card.goals_for += match.home_score or 0
+                        card.goals_against += match.away_score or 0
+                        if match.home_score > match.away_score:
+                            card.points += 3
+                        elif match.home_score == match.away_score:
+                            card.points += 1
+                    else:
+                        card.goals_for += match.away_score or 0
+                        card.goals_against += match.home_score or 0
+                        if match.away_score > match.home_score:
+                            card.points += 3
+                        elif match.home_score == match.away_score:
+                            card.points += 1
+                            
+                    card.goal_difference = card.goals_for - card.goals_against
+            
+            # Add all teams to heap
+            for card in team_stats.values():
+                standings.add_team(card)
+            
+            # Extract sorted teams
+            sorted_teams = []
+            while standings.team_heap:
+                try:
+                    sorted_teams.append(standings.pop_team())
+                except KeyError:
+                    break
+            
+            tournament_cards.append({
+                'tournament': tournament,
+                'teams': sorted_teams,
+                'total_matches': Match.objects.filter(tournament=tournament).count(),
+                'completed_matches': matches.count()
+            })
+        
+        context['tournament_cards'] = tournament_cards
+        return context
+
+    def test_func(self):
+        return self.request.user.is_staff
+
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_staff:
             messages.error(request, "You don't have permission to access this page")
@@ -320,13 +437,16 @@ class ResultViewSet(viewsets.ModelViewSet):
         
         return Response({"status": "Result confirmed"})
 
-class AdminDashboardView(LoginRequiredMixin, TemplateView):
+class AdminDashboardView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
     template_name = 'tournament/admin_dashboard.html'
     
-    def dispatch(self, request, *args, **kwargs):
-        if not request.user.is_staff:
-            return redirect('manager_dashboard')
-        return super().dispatch(request, *args, **kwargs)
+    def test_func(self):
+        return self.request.user.is_staff
+
+    def handle_no_permission(self):
+        if self.raise_exception or self.request.user.is_authenticated:
+            return HttpResponseForbidden()
+        return redirect('login')
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -344,25 +464,17 @@ class ManagerDashboardView(LoginRequiredMixin, TemplateView):
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        user = self.request.user
-        
-        # Get teams managed by the user
-        context['managed_teams'] = Team.objects.filter(manager=user)
-        
-        # Get matches for user's teams
-        user_teams = Team.objects.filter(manager=user)
+        context['managed_teams'] = Team.objects.filter(manager=self.request.user)
         context['upcoming_matches'] = Match.objects.filter(
-            models.Q(team_home__in=user_teams) | 
-            models.Q(team_away__in=user_teams),
+            Q(team_home__manager=self.request.user) | 
+            Q(team_away__manager=self.request.user),
             status='SCHEDULED'
-        ).order_by('match_date')
-        
+        )
         context['pending_results'] = Match.objects.filter(
-            models.Q(team_home__in=user_teams) | 
-            models.Q(team_away__in=user_teams),
+            Q(team_home__manager=self.request.user) | 
+            Q(team_away__manager=self.request.user),
             status='PENDING'
         )
-        
         return context
 
 class PlayerDashboardView(LoginRequiredMixin, TemplateView):
@@ -574,24 +686,12 @@ class UserDashboardView(LoginRequiredMixin, TemplateView):
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        user = self.request.user
-        
-        # Get teams managed by the user
-        context['managed_teams'] = Team.objects.filter(manager=user)
-        
-        # Get upcoming matches for user's teams
-        user_teams = Team.objects.filter(manager=user)
-        context['upcoming_matches'] = Match.objects.filter(
-            models.Q(team_home__in=user_teams) | 
-            models.Q(team_away__in=user_teams),
-            status='SCHEDULED'
-        ).order_by('match_date')
-        
-        # Get active tournaments
-        context['active_tournaments'] = Tournament.objects.filter(
-            is_active=True
-        ).order_by('datetime')
-        
+        context['teams'] = Team.objects.filter(players=self.request.user)
+        context['matches'] = Match.objects.filter(
+            Q(team_home__players=self.request.user) | 
+            Q(team_away__players=self.request.user)
+        )
+        context['tournaments'] = Tournament.objects.filter(is_active=True)
         return context
 
 class CustomLoginView(LoginView):
@@ -666,54 +766,29 @@ def bracket_image(request, tournament_id):
     bracket_image = generate_bracket_image(tournament)
     return HttpResponse(bracket_image.getvalue(), content_type='image/png')
 
-class DashboardView(LoginRequiredMixin, TemplateView):
-    """Main dashboard showing active tournaments and user's teams"""
-    template_name = 'tournament/dashboard.html'
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        user = self.request.user
-        
-        # Get active tournaments
-        context['tournaments'] = Tournament.objects.filter(
-            is_active=True
-        ).select_related('organizer')
-        
-        # Get user's teams with their matches
-        context['teams'] = Team.objects.filter(
-            manager=user
-        ).select_related('tournament')
-        
-        # Get recent matches for user's teams
-        user_teams = context['teams']
-        context['matches'] = Match.objects.filter(
-            models.Q(team_home__in=user_teams) | 
-            models.Q(team_away__in=user_teams)
-        ).select_related(
-            'team_home', 
-            'team_away',
-            'result'
-        ).order_by('match_date')
-        
-        return context
+class DashboardView(LoginRequiredMixin, View):
+    def get(self, request):
+        if request.user.is_staff:
+            return redirect('admin_dashboard')
+        elif Team.objects.filter(manager=request.user).exists():
+            return redirect('manager_dashboard')
+        else:
+            return redirect('user_dashboard')
 
 class SubmitResultView(LoginRequiredMixin, CreateView):
     model = Result
     template_name = 'tournament/submit_result.html'
     fields = ['home_score', 'away_score']
-    success_url = reverse_lazy('dashboard')
+
+    def get_success_url(self):
+        return reverse('dashboard')
 
     def form_valid(self, form):
-        match = get_object_or_404(Match, id=self.kwargs['match_id'])
+        match = get_object_or_404(Match, id=self.kwargs.get('match_id'))
         form.instance.match = match
         form.instance.team_home = match.team_home
         form.instance.team_away = match.team_away
         return super().form_valid(form)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['match'] = get_object_or_404(Match, id=self.kwargs['match_id'])
-        return context
 
 class MatchResultView(LoginRequiredMixin, DetailView):
     """Handle match result submission and confirmation"""

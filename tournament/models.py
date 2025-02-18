@@ -76,7 +76,8 @@ class Tournament(models.Model):
     )
     name = models.CharField(max_length=100)
     organizer = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
-    datetime = models.DateTimeField()
+    datetime = models.DateTimeField(default=timezone.now)
+    start_date = models.DateTimeField(default=timezone.now)
     number_of_groups = models.IntegerField(default=2)
     teams_per_group = models.IntegerField(default=4)
     is_active = models.BooleanField(default=True)
@@ -221,35 +222,32 @@ class Team(models.Model):
         return f"{self.name} ({self.player_count} players)"
 
 class Match(models.Model):
+    STAGE_CHOICES = [
+        ('GROUP', 'Group Stage'),
+        ('RO16', 'Round of 16'),
+        ('QUARTER', 'Quarter Final'),
+        ('SEMI', 'Semi Final'),
+        ('FINAL', 'Final')
+    ]
+    
+    STATUS_CHOICES = [
+        ('SCHEDULED', 'Scheduled'),
+        ('PENDING', 'Pending Confirmation'),
+        ('CONFIRMED', 'Confirmed'),
+        ('DISPUTED', 'Disputed')
+    ]
+
     slug = models.SlugField(unique=True, editable=False, default='')
     tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE)
     team_home = models.ForeignKey(Team, related_name='home_matches', on_delete=models.CASCADE)
     team_away = models.ForeignKey(Team, related_name='away_matches', on_delete=models.CASCADE)
-    match_date = models.DateTimeField()
+    match_date = models.DateTimeField(default=timezone.now)
+    stage = models.CharField(max_length=20, choices=STAGE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='SCHEDULED')
     home_score = models.IntegerField(null=True, blank=True)
     away_score = models.IntegerField(null=True, blank=True)
-    stage = models.CharField(
-        max_length=20,
-        choices=[
-            ('GROUP', 'Group Stage'),
-            ('RO16', 'Round of 16'), 
-            ('QUARTER', 'Quarter Final'),
-            ('SEMI', 'Semi Final'),
-            ('FINAL', 'Final')
-        ],
-        default='GROUP',
-    )
-    status = models.CharField(
-        max_length=20,
-        choices=[
-            ('SCHEDULED', 'Scheduled'),
-            ('PENDING', 'Pending Confirmation'),
-            ('CONFIRMED', 'Confirmed'),
-            ('DISPUTED', 'Disputed')
-        ],
-        default='SCHEDULED'
-    )
     dispute_reason = models.TextField(blank=True)
+    group = models.CharField(max_length=1, null=True, blank=True)
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
@@ -257,11 +255,14 @@ class Match(models.Model):
             self.slug = f"{self.stage}-{self.team_home}-{self.team_away}"
         super().save(*args, **kwargs)
         
-        if is_new:
+        # Create Result only if it doesn't exist
+        if is_new and not hasattr(self, 'result'):
             Result.objects.create(
                 match=self,
                 team_home=self.team_home,
-                team_away=self.team_away
+                team_away=self.team_away,
+                home_score=0,
+                away_score=0
             )
 
     def clean(self):
@@ -272,6 +273,15 @@ class Match(models.Model):
 
     class Meta:
         unique_together = ['tournament', 'team_home', 'team_away', 'stage']
+        constraints = [
+            models.CheckConstraint(
+                check=~models.Q(team_home=models.F('team_away')),
+                name='no_self_matches'
+            )
+        ]
+        indexes = [
+            models.Index(fields=['tournament', 'stage', 'group']),
+        ]
 
     def __str__(self):
         return f"{self.stage}: {self.team_home} vs {self.team_away}"
@@ -290,6 +300,32 @@ class Match(models.Model):
             }
         )
 
+    def get_winner(self):
+        """Get the winning team of the match"""
+        if self.status != 'CONFIRMED':
+            return None
+        if self.home_score > self.away_score:
+            return self.team_home
+        elif self.away_score > self.home_score:
+            return self.team_away
+        return None
+
+    def get_group_points(self, team):
+        """Get points for a team in this group match"""
+        if self.status != 'CONFIRMED':
+            return 0
+        if team == self.team_home:
+            if self.home_score > self.away_score:
+                return 3
+            elif self.home_score == self.away_score:
+                return 1
+        elif team == self.team_away:
+            if self.away_score > self.home_score:
+                return 3
+            elif self.home_score == self.away_score:
+                return 1
+        return 0
+
 # Add signal handler as backup
 @receiver(post_save, sender=Match)
 def create_match_result(sender, instance, created, **kwargs):
@@ -304,7 +340,7 @@ def create_match_result(sender, instance, created, **kwargs):
         )
 
 class Result(models.Model):
-    match = models.ForeignKey(Match, on_delete=models.CASCADE)
+    match = models.OneToOneField(Match, on_delete=models.CASCADE)
     team_home = models.ForeignKey(Team, related_name='home_results', on_delete=models.CASCADE)
     team_away = models.ForeignKey(Team, related_name='away_results', on_delete=models.CASCADE)
     home_score = models.IntegerField(default=0)
@@ -312,18 +348,21 @@ class Result(models.Model):
     home_confirmed = models.BooleanField(default=False)
     away_confirmed = models.BooleanField(default=False)
     confirmed = models.BooleanField(default=False)
-
-    def __str__(self):
-        return f"{self.match} - {self.team_home} vs {self.team_away}"
+    extra_time = models.BooleanField(default=False)
+    penalties = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
         if self.home_confirmed and self.away_confirmed:
             self.confirmed = True
-        elif self.home_confirmed or self.away_confirmed:
-            self.confirmed = False
-            self.disputed = True
+            # Update match status when both teams confirm
+            self.match.status = 'CONFIRMED'
+            self.match.home_score = self.home_score
+            self.match.away_score = self.away_score
+            self.match.save()
         else:
             self.confirmed = False
-            self.disputed = False
         super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.match} - {self.home_score}:{self.away_score}"
 

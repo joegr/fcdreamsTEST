@@ -4,6 +4,9 @@ from datetime import timedelta
 from django.utils import timezone
 from ..models import Tournament, Team, Match
 from .group_stage import GroupStageService
+import logging
+
+logger = logging.getLogger(__name__)
 
 class KnockoutService:
     def __init__(self, tournament: Tournament):
@@ -140,42 +143,37 @@ class KnockoutService:
             winners.append(winner)
         return winners
 
-    def generate_next_stage_matches(self, winners: List[Team]) -> List[Match]:
-        """Generate matches for next stage based on winners"""
-        stage_progression = {
-            'GROUP': 'RO16',  # Add GROUP to progression
-            'RO16': 'QUARTER',
-            'QUARTER': 'SEMI',
-            'SEMI': 'FINAL'
-        }
+    def generate_next_round_matches(self, winners: List[Team]) -> List[Match]:
+        """Generate matches for the next knockout round"""
+        if len(winners) % 2 != 0:
+            raise ValueError("Need even number of teams")
+
+        current_stage = self._get_current_stage()
+        next_stage = self._get_next_stage(current_stage)
         
-        current_matches = Match.objects.filter(
-            tournament=self.tournament,
-            team_home__in=winners,
-            status='CONFIRMED'
-        ).first()
-        
-        if not current_matches:
-            raise ValueError("No completed matches found with winners")
-        
-        current_stage = current_matches.stage
-        next_stage = stage_progression.get(current_stage)
-        
-        if not next_stage:
-            raise ValueError(f"No next stage after {current_stage}")
-        
-        # Create matches for next stage
         matches = []
         for i in range(0, len(winners), 2):
-            match = Match.objects.create(
-                tournament=self.tournament,
-                team_home=winners[i],
-                team_away=winners[i+1],
-                match_date=self.tournament.datetime + timedelta(days=i//2),
-                stage=next_stage,
-                status='SCHEDULED'
-            )
-            matches.append(match)
+            try:
+                team_home = winners[i]
+                team_away = winners[i + 1]
+
+                if team_home.id == team_away.id:
+                    raise ValueError("A team cannot play against itself")
+
+                match = Match.objects.create(
+                    tournament=self.tournament,
+                    team_home=team_home,
+                    team_away=team_away,
+                    stage=next_stage,
+                    status='SCHEDULED',
+                    match_date=timezone.now() + timedelta(days=7)
+                )
+                matches.append(match)
+
+            except ValueError as e:
+                logger.warning(f"Failed to create match: {e}")
+                continue
+
         return matches
 
     def _get_next_stage(self, current_stage: str) -> str:
@@ -185,4 +183,39 @@ class KnockoutService:
             'SEMI': 'FINAL',
             'FINAL': None
         }
-        return stages.get(current_stage) 
+        return stages.get(current_stage)
+
+    def generate_knockout_matches(self, teams: List[Team], stage: str) -> List[Match]:
+        """Generate knockout matches for given teams and stage"""
+        if len(teams) % 2 != 0:
+            raise ValueError("Need even number of teams")
+        
+        matches = []
+        for i in range(0, len(teams), 2):
+            match = Match.objects.create(
+                tournament=self.tournament,
+                team_home=teams[i],
+                team_away=teams[i + 1],
+                stage=stage,
+                match_date=timezone.now() + timedelta(days=i+1)
+            )
+            matches.append(match)
+        return matches
+
+    def get_match_winner(self, match: Match) -> Optional[Team]:
+        """Get the winner of a knockout match"""
+        if match.status != 'CONFIRMED':
+            return None
+            
+        if match.home_score > match.away_score:
+            return match.team_home
+        elif match.away_score > match.home_score:
+            return match.team_away
+            
+        # If scores are equal, check for extra time/penalties
+        result = match.result
+        if result.extra_time or result.penalties:
+            # In knockout stages, there must be a winner
+            return match.team_home if match.home_score > match.away_score else match.team_away
+            
+        return None 
