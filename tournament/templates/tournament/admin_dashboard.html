@@ -1,87 +1,89 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
 {% block content %}
-<div class="dashboard-container">
-    <h1>Tournament Admin Dashboard</h1>
+<div class="container">
+    <h1>Admin Dashboard</h1>
     
-    <div class="dashboard-grid">
-        <!-- Available Teams Section -->
-        <div class="dashboard-section">
-            <h2>Available Teams</h2>
-            <p>Teams waiting for tournament: {{ available_teams_count }}</p>
-            {% if can_create_tournament %}
-                <form method="post">
-                    {% csrf_token %}
-                    <button type="submit" name="create_tournament" class="btn btn-primary">
-                        Create New Tournament
-                    </button>
-                </form>
-            {% else %}
-                <p class="alert alert-info">Need {{ 8|sub:available_teams_count }} more teams to create a tournament</p>
-            {% endif %}
-            
-            {% for team in available_teams %}
-            <div class="team-card">
-                <h3>{{ team.name }}</h3>
-                <p>Players: {{ team.player_count }}/14</p>
-            </div>
-            {% endfor %}
+    <div class="row">
+        <div class="col-md-6">
+            <h2>Tournaments</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Teams</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tournament in tournaments %}
+                    <tr>
+                        <td>{{ tournament.name }}</td>
+                        <td>{{ tournament.status }}</td>
+                        <td>{{ tournament.team_set.count }}</td>
+                        <td>
+                            <a href="{% url 'tournament_standings' tournament.pk %}" class="btn btn-sm btn-info">View</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-
-        <!-- Active Tournaments Section -->
-        <div class="dashboard-section">
-            <h2>Active Tournaments</h2>
-            {% for tournament in tournaments %}
-            <div class="tournament-card">
-                <h3>{{ tournament.name }}</h3>
-                <p>Status: {{ tournament.get_status_display }}</p>
-                <div class="tournament-actions">
-                    <a href="{% url 'tournament_standings' tournament.pk %}" class="btn">View Standings</a>
-                    {% if tournament.status == 'REGISTRATION' %}
-                        <form method="post" action="{% url 'tournament-start-group-stage' tournament.pk %}">
-                            {% csrf_token %}
-                            <button type="submit" class="btn">Start Group Stage</button>
-                        </form>
-                    {% endif %}
-                </div>
-            </div>
-            {% endfor %}
+        
+        <div class="col-md-6">
+            <h2>Pending Teams</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Team</th>
+                        <th>Players</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for team in pending_teams %}
+                    <tr>
+                        <td>{{ team.name }}</td>
+                        <td>{{ team.player_count }}</td>
+                        <td>{% if team.registration_complete %}Complete{% else %}Pending{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-
-        <div class="dashboard-section">
-            <h2>Pending Team Registrations</h2>
-            {% for team in pending_teams %}
-            <div class="team-card">
-                <h3>{{ team.name }}</h3>
-                <p>Players: {{ team.player_count }}/8 required</p>
-            </div>
-            {% endfor %}
-        </div>
-
-        <div class="dashboard-section">
-            <h2>Pending Match Results</h2>
-            {% for match in pending_matches %}
-            <div class="match-card">
-                <p>{{ match.team_home.name }} vs {{ match.team_away.name }}</p>
-                <p>Date: {{ match.match_date }}</p>
-            </div>
-            {% endfor %}
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-12">
+            <h2>Pending Matches</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Tournament</th>
+                        <th>Home Team</th>
+                        <th>Away Team</th>
+                        <th>Stage</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for match in pending_matches %}
+                    <tr>
+                        <td>{{ match.tournament.name }}</td>
+                        <td>{{ match.team_home.name }}</td>
+                        <td>{{ match.team_away.name }}</td>
+                        <td>{{ match.stage }}</td>
+                        <td>{{ match.status }}</td>
+                        <td>
+                            <a href="{% url 'submit_result' match.id %}" class="btn btn-sm btn-primary">Submit Result</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
-
-<style>
-.btn-primary {
-    background-color: #007bff;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.btn-primary:hover {
-    background-color: #0056b3;
-}
-</style>
 {% endblock %} 

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Confirm Match Result{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h3>Confirm Match Result</h3>
+                </div>
+                <div class="card-body">
+                    <h4 class="mb-4">{{ match.team_home.name }} vs {{ match.team_away.name }}</h4>
+                    <p class="text-muted">Match Date: {{ match.match_date }}</p>
+                    <p class="text-muted">Stage: {{ match.get_stage_display }}</p>
+                    
+                    <div class="alert alert-info">
+                        <h5>Submitted Result:</h5>
+                        <p class="lead">{{ match.team_home.name }} {{ result.home_score }} - {{ result.away_score }} {{ match.team_away.name }}</p>
+                        
+                        {% if result.extra_time %}
+                            <p><span class="badge bg-warning">Extra Time</span></p>
+                        {% endif %}
+                        
+                        {% if result.penalties %}
+                            <p><span class="badge bg-warning">Penalties</span></p>
+                        {% endif %}
+                    </div>
+                    
+                    {% if is_home_team and not result.home_confirmed or not is_home_team and not result.away_confirmed %}
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="form-group">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="confirm_result" name="confirm_result" required>
+                                    <label class="form-check-label" for="confirm_result">
+                                        I confirm that this result is correct
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-success mt-3">Confirm Result</button>
+                            <a href="{% url 'dashboard' %}" class="btn btn-secondary mt-3">Cancel</a>
+                        </form>
+                    {% else %}
+                        <div class="alert alert-success">
+                            <p>You have already confirmed this result.</p>
+                            <p>Waiting for the other team to confirm.</p>
+                        </div>
+                        <a href="{% url 'dashboard' %}" class="btn btn-primary">Back to Dashboard</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

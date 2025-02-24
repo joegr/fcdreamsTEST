@@ -142,3 +142,7 @@ LOGIN_URL = '/accounts/login/'
 
 # Test Configuration
 TEST_RUNNER = 'django.test.runner.DiscoverRunner'
+TEST_DISCOVER_PATTERNS = [
+    "*/tests/*.py",
+    "*/tests.py",
+]

@@ -244,8 +244,6 @@ class Match(models.Model):
     match_date = models.DateTimeField(default=timezone.now)
     stage = models.CharField(max_length=20, choices=STAGE_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='SCHEDULED')
-    home_score = models.IntegerField(null=True, blank=True)
-    away_score = models.IntegerField(null=True, blank=True)
     dispute_reason = models.TextField(blank=True)
     group = models.CharField(max_length=1, null=True, blank=True)
 
@@ -255,15 +253,7 @@ class Match(models.Model):
             self.slug = f"{self.stage}-{self.team_home}-{self.team_away}"
         super().save(*args, **kwargs)
         
-        # Create Result only if it doesn't exist
-        if is_new and not hasattr(self, 'result'):
-            Result.objects.create(
-                match=self,
-                team_home=self.team_home,
-                team_away=self.team_away,
-                home_score=0,
-                away_score=0
-            )
+        # Result creation is now handled by the create_match_result signal
 
     def clean(self):
         if self.team_home == self.team_away:
@@ -288,6 +278,7 @@ class Match(models.Model):
 
     def log_match_result(self):
         """Log match results"""
+        result = self.result
         self.tournament.log_state_change(
             'MATCH_COMPLETED',
             {
@@ -295,8 +286,8 @@ class Match(models.Model):
                 'stage': self.stage,
                 'home_team': self.team_home.name,
                 'away_team': self.team_away.name,
-                'score': f"{self.home_score}-{self.away_score}",
-                'winner': self.team_home.name if self.home_score > self.away_score else self.team_away.name
+                'score': f"{result.home_score}-{result.away_score}",
+                'winner': self.team_home.name if result.home_score > result.away_score else self.team_away.name
             }
         )
 
@@ -304,9 +295,10 @@ class Match(models.Model):
         """Get the winning team of the match"""
         if self.status != 'CONFIRMED':
             return None
-        if self.home_score > self.away_score:
+        result = self.result
+        if result.home_score > result.away_score:
             return self.team_home
-        elif self.away_score > self.home_score:
+        elif result.away_score > result.home_score:
             return self.team_away
         return None
 
@@ -314,30 +306,18 @@ class Match(models.Model):
         """Get points for a team in this group match"""
         if self.status != 'CONFIRMED':
             return 0
+        result = self.result
         if team == self.team_home:
-            if self.home_score > self.away_score:
+            if result.home_score > result.away_score:
                 return 3
-            elif self.home_score == self.away_score:
+            elif result.home_score == result.away_score:
                 return 1
         elif team == self.team_away:
-            if self.away_score > self.home_score:
+            if result.away_score > result.home_score:
                 return 3
-            elif self.home_score == self.away_score:
+            elif result.home_score == result.away_score:
                 return 1
         return 0
-
-# Add signal handler as backup
-@receiver(post_save, sender=Match)
-def create_match_result(sender, instance, created, **kwargs):
-    """Create Result when Match is created"""
-    if created and not hasattr(instance, 'result'):
-        Result.objects.create(
-            match=instance,
-            team_home=instance.team_home,
-            team_away=instance.team_away,
-            home_score=0,
-            away_score=0
-        )
 
 class Result(models.Model):
     match = models.OneToOneField(Match, on_delete=models.CASCADE)

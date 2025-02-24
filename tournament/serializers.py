@@ -27,15 +27,43 @@ class TournamentSerializer(serializers.ModelSerializer):
         return obj.get_status_display()
 
 class MatchSerializer(serializers.ModelSerializer):
+    home_score = serializers.SerializerMethodField()
+    away_score = serializers.SerializerMethodField()
+
     class Meta:
         model = Match
         fields = ['id', 'tournament', 'team_home', 'team_away', 'match_date',
                  'home_score', 'away_score', 'stage', 'status']
 
+    def get_home_score(self, obj):
+        return obj.result.home_score if hasattr(obj, 'result') else 0
+
+    def get_away_score(self, obj):
+        return obj.result.away_score if hasattr(obj, 'result') else 0
+
 class ResultSerializer(serializers.ModelSerializer):
     class Meta:
         model = Result
-        fields = ['id', 'match', 'team', 'score', 'opponent_score', 'score_img', 'confirmed']
+        fields = [
+            'id', 
+            'match',
+            'team_home',
+            'team_away', 
+            'home_score',
+            'away_score',
+            'home_confirmed',
+            'away_confirmed',
+            'confirmed',
+            'extra_time',
+            'penalties'
+        ]
+    
+    def validate(self, data):
+        if data.get('penalties') and not data.get('extra_time'):
+            raise serializers.ValidationError(
+                "Penalties can only occur after extra time"
+            )
+        return data
 
 class MatchResultSerializer(serializers.Serializer):
     our_score = serializers.IntegerField(min_value=0)

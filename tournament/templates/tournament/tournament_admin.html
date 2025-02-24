@@ -10,7 +10,7 @@
         <h2>{{ tournament_card.tournament.name }}</h2>
         <div class="progress">
             <div class="progress-bar" role="progressbar" 
-                 style="width: {{ tournament_card.completed_matches|div:tournament_card.total_matches|mul:100 }}%">
+                 style="width: {% widthratio tournament_card.completed_matches tournament_card.total_matches 100 %}%">
                 {{ tournament_card.completed_matches }}/{{ tournament_card.total_matches }} matches completed
             </div>
         </div>

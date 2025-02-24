@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>Manager Dashboard</h1>
+    
+    <div class="row">
+        <div class="col-md-6">
+            <h2>My Teams</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Team Name</th>
+                        <th>Players</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for team in managed_teams %}
+                    <tr>
+                        <td>{{ team.name }}</td>
+                        <td>{{ team.player_count }}/14</td>
+                        <td>{% if team.registration_complete %}Complete{% else %}Pending{% endif %}</td>
+                        <td>
+                            <a href="{% url 'team_detail' team.pk %}" class="btn btn-sm btn-info">View</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="col-md-6">
+            <h2>Upcoming Matches</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Tournament</th>
+                        <th>Opponent</th>
+                        <th>Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for match in upcoming_matches %}
+                    <tr>
+                        <td>{{ match.tournament.name }}</td>
+                        <td>
+                            {% if match.team_home.manager == request.user %}
+                                {{ match.team_away.name }}
+                            {% else %}
+                                {{ match.team_home.name }}
+                            {% endif %}
+                        </td>
+                        <td>{{ match.match_date }}</td>
+                        <td>
+                            <a href="{% url 'submit_result' match.id %}" class="btn btn-sm btn-primary">Submit Result</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-12">
+            <h2>Pending Results</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Match</th>
+                        <th>Tournament</th>
+                        <th>Stage</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for match in pending_results %}
+                    <tr>
+                        <td>{{ match.team_home.name }} vs {{ match.team_away.name }}</td>
+                        <td>{{ match.tournament.name }}</td>
+                        <td>{{ match.stage }}</td>
+                        <td>{{ match.status }}</td>
+                        <td>
+                            <a href="{% url 'confirm_result' match.pk %}" class="btn btn-sm btn-success">Confirm Result</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %} 

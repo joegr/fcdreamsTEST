@@ -115,15 +115,12 @@ class TournamentProgressionTest(TestCase):
 			match.status = 'CONFIRMED'
 			match.save()
 			
-			# Create and confirm result
-			Result.objects.create(
-				match=match,
-				team_home=match.team_home,
-				team_away=match.team_away,
-				home_score=match.home_score,
-				away_score=match.away_score,
-				confirmed=True
-			)
+			# Update the automatically created result
+			result = match.result
+			result.home_score = match.home_score
+			result.away_score = match.away_score
+			result.confirmed = True
+			result.save()
 		
 		# Now we can get qualified teams
 		qualified_teams = self.group_service.get_qualified_teams()
@@ -279,10 +276,16 @@ class GroupStageTestCase(TestCase):
             team_away=self.teams[1],
             stage='GROUP',
             group='A',
-            home_score=2,
-            away_score=1,
             status='CONFIRMED'
         )
+        
+        # Update the result
+        result = match.result
+        result.home_score = 2
+        result.away_score = 1
+        result.home_confirmed = True
+        result.away_confirmed = True
+        result.save()
         
         # Get standings for group A
         standings = self.service.get_group_standings('A')
@@ -317,11 +320,18 @@ class KnockoutStageTestCase(TestCase):
             tournament=self.tournament,
             team_home=self.teams[0],
             team_away=self.teams[1],
-            home_score=2,
-            away_score=1,
             status='CONFIRMED',
             stage='RO16'
         )
+        
+        # Update the result
+        result = match.result
+        result.home_score = 2
+        result.away_score = 1
+        result.home_confirmed = True
+        result.away_confirmed = True
+        result.save()
+        
         winner = self.service.get_match_winner(match)
         self.assertEqual(winner, self.teams[0])
 
@@ -454,11 +464,12 @@ class DashboardViewTests(TestCase):
         response = self.client.get(reverse('dashboard'))
         self.assertRedirects(response, reverse('admin_dashboard'))
         
-        # Test regular user redirect
-        self.user.is_staff = False
-        self.team.manager = None
-        self.team.save()
-        self.user.save()
+        # Create a new user without a team for the user redirect test
+        regular_user = User.objects.create_user(
+            username='regularuser',
+            password='testpass123'
+        )
+        self.client.force_login(regular_user)
         response = self.client.get(reverse('dashboard'))
         self.assertRedirects(response, reverse('user_dashboard'))
 

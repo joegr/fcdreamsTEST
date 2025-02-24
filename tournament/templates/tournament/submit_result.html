@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Submit Match Result{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h3>Submit Match Result</h3>
+                </div>
+                <div class="card-body">
+                    <h4 class="mb-4">{{ match.team_home.name }} vs {{ match.team_away.name }}</h4>
+                    <p class="text-muted">Match Date: {{ match.match_date }}</p>
+                    <p class="text-muted">Stage: {{ match.get_stage_display }}</p>
+                    
+                    {% if match.status == 'SCHEDULED' %}
+                        <form method="post" enctype="multipart/form-data">
+                            {% csrf_token %}
+                            <input type="hidden" name="match" value="{{ match.id }}">
+                            
+                            <div class="form-group row mb-3">
+                                <label for="home_score" class="col-sm-4 col-form-label">{{ match.team_home.name }} Score:</label>
+                                <div class="col-sm-8">
+                                    <input type="number" class="form-control" id="home_score" name="home_score" min="0" required>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group row mb-3">
+                                <label for="away_score" class="col-sm-4 col-form-label">{{ match.team_away.name }} Score:</label>
+                                <div class="col-sm-8">
+                                    <input type="number" class="form-control" id="away_score" name="away_score" min="0" required>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group row mb-3">
+                                <label for="score_img" class="col-sm-4 col-form-label">Screenshot of Score:</label>
+                                <div class="col-sm-8">
+                                    <input type="file" class="form-control" id="score_img" name="score_img" accept="image/*">
+                                    <small class="form-text text-muted">Upload a screenshot of the final score screen</small>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group row">
+                                <div class="col-sm-8 offset-sm-4">
+                                    <button type="submit" class="btn btn-primary">Submit Result</button>
+                                </div>
+                            </div>
+                        </form>
+                    {% else %}
+                        <div class="alert alert-info">
+                            <p>This match result has already been submitted.</p>
+                            <p>Current status: {{ match.get_status_display }}</p>
+                            
+                            {% if match.result %}
+                                <p>Score: {{ match.result.home_score }} - {{ match.result.away_score }}</p>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="card-footer">
+                    <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

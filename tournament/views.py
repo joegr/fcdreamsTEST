@@ -40,6 +40,8 @@ from heapq import heappush, heappop
 from dataclasses import dataclass
 from typing import List
 import itertools
+from django.db import connection
+from django.http import Http404
 
 class SignUpView(CreateView):
     form_class = UserCreationForm
@@ -395,17 +397,28 @@ class MatchViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Create or update result
-        result, created = Result.objects.get_or_create(
-            match=match,
-            submitting_team=team,
-            defaults=serializer.validated_data
-        )
-        
-        if not created:
-            for key, value in serializer.validated_data.items():
-                setattr(result, key, value)
+        # Get or create result
+        try:
+            result = Result.objects.get(match=match)
+            
+            # Update the result based on which team is submitting
+            if team == match.team_home:
+                result.home_score = serializer.validated_data.get('home_score', result.home_score)
+                result.away_score = serializer.validated_data.get('away_score', result.away_score)
+                result.home_confirmed = True
+            else:
+                result.home_score = serializer.validated_data.get('home_score', result.home_score)
+                result.away_score = serializer.validated_data.get('away_score', result.away_score)
+                result.away_confirmed = True
+                
             result.save()
+            
+        except Result.DoesNotExist:
+            # This shouldn't happen as results are created with matches
+            return Response(
+                {"error": "Match result not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         return Response({"status": "Result submitted successfully"}, status=status.HTTP_200_OK)
 
@@ -415,23 +428,38 @@ class ResultViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
-        serializer.save(submitting_team=self.request.user.team_set.first())
+        team = self.request.user.team_set.first()
+        match = serializer.validated_data.get('match')
+        
+        if team == match.team_home:
+            serializer.save(home_confirmed=True)
+        elif team == match.team_away:
+            serializer.save(away_confirmed=True)
+        else:
+            serializer.save()
 
     @action(detail=True, methods=['post'])
     def confirm_result(self, request, pk=None):
         result = self.get_object()
-        if result.submitting_team == request.user.team_set.first():
+        team = request.user.team_set.first()
+        match = result.match
+        
+        if team not in [match.team_home, match.team_away]:
             return Response(
-                {"error": "Cannot confirm your own result submission"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Not authorized to confirm this match result"},
+                status=status.HTTP_403_FORBIDDEN
             )
         
-        result.confirmed = True
+        # Set the appropriate confirmation flag
+        if team == match.team_home:
+            result.home_confirmed = True
+        else:
+            result.away_confirmed = True
+            
         result.save()
         
         # Update match status if both teams have confirmed results
-        match = result.match
-        if match.results.filter(confirmed=True).count() == 2:
+        if result.home_confirmed and result.away_confirmed:
             match.status = 'CONFIRMED'
             match.save()
         
@@ -662,6 +690,12 @@ class GroupStageView(LoginRequiredMixin, DetailView):
     template_name = 'tournament/group_stage.html'
     context_object_name = 'tournament'
 
+    def get_object(self, queryset=None):
+        tournament = super().get_object(queryset)
+        if tournament.status == 'REGISTRATION':
+            raise Http404("Group stage not started yet")
+        return tournament
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         tournament = self.get_object()
@@ -686,10 +720,12 @@ class UserDashboardView(LoginRequiredMixin, TemplateView):
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['teams'] = Team.objects.filter(players=self.request.user)
+        # Get teams managed by the user
+        context['teams'] = Team.objects.filter(manager=self.request.user)
+        # Get matches for teams managed by the user
         context['matches'] = Match.objects.filter(
-            Q(team_home__players=self.request.user) | 
-            Q(team_away__players=self.request.user)
+            Q(team_home__manager=self.request.user) | 
+            Q(team_away__manager=self.request.user)
         )
         context['tournaments'] = Tournament.objects.filter(is_active=True)
         return context
@@ -837,3 +873,13 @@ class MatchResultView(LoginRequiredMixin, DetailView):
         except ValueError as e:
             messages.error(request, str(e))
             return redirect('match_detail', pk=match.pk)
+
+def health_check(request):
+    try:
+        # Test database connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        return HttpResponse("OK", status=200)
+    except Exception as e:
+        return HttpResponse(str(e), status=500)

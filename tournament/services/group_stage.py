@@ -54,19 +54,20 @@ class GroupStageService:
             tournament=self.tournament,
             stage='GROUP',
             status='CONFIRMED'
-        )
+        ).select_related('result')
         if group_letter:
             matches = matches.filter(group=group_letter)
 
         # Calculate team statistics
         team_stats = {}
         for match in matches:
+            result = match.result
             for team, is_home in [(match.team_home, True), (match.team_away, False)]:
                 if team not in team_stats:
                     team_stats[team] = {'points': 0, 'goals_for': 0, 'goals_against': 0}
                 
-                goals_for = match.home_score if is_home else match.away_score
-                goals_against = match.away_score if is_home else match.home_score
+                goals_for = result.home_score if is_home else result.away_score
+                goals_against = result.away_score if is_home else result.home_score
                 
                 team_stats[team]['goals_for'] += goals_for
                 team_stats[team]['goals_against'] += goals_against

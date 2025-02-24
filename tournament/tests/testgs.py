@@ -84,14 +84,12 @@ class GroupStageTests(TestCase):
         self.assertFalse(result.confirmed)
 
     def test_verify_matching_results(self):
-        # Submit result from team 1
-        Result.objects.create(
-            match=self.match,
-            team=self.team1,
-            score=2,
-            opponent_score=1,
-            score_img=SimpleUploadedFile("score1.jpg", b"file_content")
-        )
+        # Get the automatically created result for team 1 and update it
+        result = self.match.result
+        result.score = 2
+        result.opponent_score = 1
+        result.score_img = SimpleUploadedFile("score1.jpg", b"file_content")
+        result.save()
         
         # Submit matching result from team 2
         self.client.login(username='manager2', password='pass123')
@@ -125,14 +123,12 @@ class GroupStageTests(TestCase):
         self.assertTrue(len(standings) > 0)
 
     def test_handle_mismatched_results(self):
-        # Submit result from team 1
-        Result.objects.create(
-            match=self.match,
-            team=self.team1,
-            score=2,
-            opponent_score=1,
-            score_img=SimpleUploadedFile("score1.jpg", b"file_content")
-        )
+        # Get the automatically created result for team 1 and update it
+        result = self.match.result
+        result.score = 2
+        result.opponent_score = 1
+        result.score_img = SimpleUploadedFile("score1.jpg", b"file_content")
+        result.save()
         
         # Submit conflicting result from team 2
         self.client.login(username='manager2', password='pass123')

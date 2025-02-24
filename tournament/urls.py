@@ -10,7 +10,7 @@ from .views import (
     GroupStageView, UserDashboardView,
     CustomLoginView, AdminDashboardView,
     PlayerDashboardView, submit_result, bracket_image,
-    DashboardView, SubmitResultView
+    DashboardView, SubmitResultView, health_check
 )
 from django.contrib.auth import views as auth_views
 
@@ -65,4 +65,5 @@ urlpatterns = [
     # Suggested paths
     path('', DashboardView.as_view(), name='dashboard'),
     path('submit-result/', SubmitResultView.as_view(), name='submit-result'),
+    path('health/', health_check, name='health_check'),
 ]

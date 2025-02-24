@@ -13,6 +13,19 @@ from .services.notification import notify_team_for_confirmation, notify_match_co
 
 logger = logging.getLogger('tournament.state')
 
+# Add the create_match_result signal handler
+@receiver(post_save, sender=Match)
+def create_match_result(sender, instance, created, **kwargs):
+    """Create a Result object when a Match is created"""
+    if created and not hasattr(instance, 'result'):
+        Result.objects.create(
+            match=instance,
+            team_home=instance.team_home,
+            team_away=instance.team_away,
+            home_score=0,
+            away_score=0
+        )
+
 class SingletonGroupStageManager:
     _instance = None
     _instance_lock = Lock()
@@ -59,16 +72,6 @@ class SingletonGroupStageManager:
 gsm_factory = SingletonGroupStageManager()
 
 @receiver(post_save, sender=Match)
-def create_match_result(sender, instance, created, **kwargs):
-    """Create Result object when Match is created"""
-    if created and not hasattr(instance, 'result'):
-        Result.objects.create(
-            match=instance,
-            home_score=0,
-            away_score=0,
-            is_confirmed=False
-        )
-@receiver(post_save, sender=Match)
 def handle_match_completion(sender, instance, **kwargs):
     """Handle match completion and logging"""
     if instance.status == 'CONFIRMED':
@@ -78,14 +81,12 @@ def handle_match_completion(sender, instance, **kwargs):
 @receiver(post_save, sender=Result)
 def handle_result_confirmation(sender, instance, created, **kwargs):
     """Handle match result confirmation and tournament progression"""
-    if not created and instance.home_team_confirmed and instance.away_team_confirmed:
+    if not created and instance.home_confirmed and instance.away_confirmed:
         try:
             match = instance.match
             # Only process if match isn't already confirmed
             if match.status != 'CONFIRMED':
                 match.status = 'CONFIRMED'
-                match.home_score = instance.home_score
-                match.away_score = instance.away_score
                 match.save()
                 
                 # Notify both teams
@@ -96,10 +97,10 @@ def handle_result_confirmation(sender, instance, created, **kwargs):
                 tournament_service.handle_result_confirmation(instance)
         except Exception as e:
             logger.error(f"Error handling result confirmation: {e}")
-    elif not created and (instance.home_team_confirmed or instance.away_team_confirmed):
+    elif not created and (instance.home_confirmed or instance.away_confirmed):
         # Notify other team to confirm
         match = instance.match
-        if instance.home_team_confirmed:
+        if instance.home_confirmed:
             notify_team_for_confirmation(match.team_away)
         else:
             notify_team_for_confirmation(match.team_home)
