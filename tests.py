@@ -168,7 +168,8 @@ class TournamentProgressionTest(TestCase):
 		else:
 			result.home_score, result.away_score = 0, 2
 		
-		result.home_team_confirmed = result.away_team_confirmed = True
+		result.home_confirmed = True
+		result.away_confirmed = True
 		result.save()
 
 class ModelTests(TestCase):

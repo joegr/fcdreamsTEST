@@ -48,9 +48,12 @@ class GroupStageTestCase(TestCase):
     def test_result_processing(self):
         """Test match result handling"""
         match = self.tournament.match_set.first()
-        match.home_score = 2
-        match.away_score = 1
-        match.save()
+        result = Result.objects.get(match=match)
+        result.home_score = 2
+        result.away_score = 1
+        result.home_confirmed = True
+        result.away_confirmed = True
+        result.save()
         
         standings = self.service.get_group_standings(match.group)
         winner = next(t for t in standings if t['team'] == match.team_home)
@@ -60,11 +63,13 @@ class GroupStageTestCase(TestCase):
         """Test group stage completion"""
         matches = self.tournament.match_set.all()
         for match in matches:
-            match.home_score = 1
-            match.away_score = 0
-            match.status = 'CONFIRMED'
-            match.save()
+            result = Result.objects.get(match=match)
+            result.home_score = 1
+            result.away_score = 0
+            result.home_confirmed = True
+            result.away_confirmed = True
+            result.save()
             
-        self.assertTrue(self.service.check_group_completion())
+        self.assertTrue(self.service.is_group_stage_complete())
         qualified = self.service.get_qualified_teams()
         self.assertEqual(len(qualified), 16)
